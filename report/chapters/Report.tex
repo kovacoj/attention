@@ -184,25 +184,49 @@ The final step is to separate sketching error from finite-precision error.
     The first term in the bound is a purely sketching term; the second is a purely numerical term. In the intended mixed-precision regime, the numerical term should be lower order. This is the precise statement that the experiments are meant to test.
 \end{remark}
 
-\section{Proposed Experiments}
+\section{Numerical Experiments}
 
-The numerical part of the project is not meant to be a large benchmark. Its role is to probe the analytical decomposition above. Accordingly, the experiments should compare three levels of computation:
+The experiments probe the decomposition of Proposition~3 directly. For each combination of parameters $(n, d, s)$ and each precision configuration we compute three logit matrices:
 \begin{enumerate}
-    \item exact unsketched attention in \texttt{float64};
-    \item exact sketched attention in \texttt{float64};
-    \item sketched attention in \texttt{float16} and mixed precision.
+    \item $\mathcal{L}(Q,K)$: exact unsketched logits in \texttt{float64} (reference);
+    \item $\widetilde{\mathcal{L}}_S(Q,K)$: exact sketched logits in \texttt{float64};
+    \item $\widehat{\mathcal{L}}_S(Q,K)$: sketched logits in the target precision.
 \end{enumerate}
+The sketching term is $\|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$ and the rounding term is $\|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$, both measured in Hilbert--Schmidt norm. The same decomposition is recorded for the attention output. We test three precision configurations: \texttt{full\_fp32} (all stages in float32), \texttt{full\_fp16} (all stages in float16), and \texttt{mixed\_fp16} (storage in float16, accumulation and softmax in float32).
 
-For each configuration we measure:
-\begin{itemize}
-    \item the Hilbert--Schmidt error of the logits,
-    \item the rowwise simplex error after softmax,
-    \item the Hilbert--Schmidt error of the final attention output,
-    \item the runtime.
-\end{itemize}
+The sketch $S \in \mathbb{R}^{d \times s}$ is a scaled Gaussian matrix with i.i.d.\ $\mathcal{N}(0, 1/s)$ entries. We sweep $n \in \{64, 128, 256\}$, $d \in \{32, 64\}$, $s \in \{8, 16, 24, 32\}$, and average over three seeds.
 
-The theoretical narrative suggests the following validation strategy. First, compare the exact unsketched and exact sketched logits; this isolates the sketching term. Second, compare the exact sketched and low-precision sketched logits; this isolates the numerical term. Finally, compare the resulting attention outputs. The main hypothesis is that once the sketch dimension $s$ is moderate, the rounding term will be substantially smaller than the sketching term under mixed-precision accumulation, even if naive low precision is noticeably less stable.
+Table~1 reports the HS errors of the logits for $d = 64$; the output errors follow the same pattern and are omitted for brevity. The sketching term is 3--4 orders of magnitude larger than the rounding term under \texttt{full\_fp32}, and 1--2 orders larger under \texttt{full\_fp16} and \texttt{mixed\_fp16}. In all tested regimes the total error $\|\mathcal{L} - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$ is dominated by the sketching term, confirming the hypothesis of Proposition~3.
+
+\begin{table}[ht]
+\centering
+\caption{Hilbert--Schmidt errors of the logit matrix ($d = 64$, averaged over 3 seeds). Sketching error $E_{\mathrm{sk}} := \|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$; rounding error $E_{\mathrm{rd}} := \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$; ratio $E_{\mathrm{sk}} / E_{\mathrm{rd}}$.}
+\label{tab:results}
+\small
+\begin{tabular}{ll rrr}
+\toprule
+Configuration & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{rd}}$ & $E_{\mathrm{sk}} / E_{\mathrm{rd}}$ \\
+\midrule
+\texttt{full\_fp32}  &  8 & 6.23e+02 & 9.92e-05 & 6.3e+06 \\
+                     & 16 & 4.73e+02 & 9.79e-05 & 4.8e+06 \\
+                     & 24 & 3.49e+02 & 7.86e-05 & 4.4e+06 \\
+                     & 32 & 3.10e+02 & 7.42e-05 & 4.2e+06 \\
+\midrule
+\texttt{full\_fp16}  &  8 & 6.23e+02 & 3.70e-01 & 1.7e+03 \\
+                     & 16 & 4.73e+02 & 2.51e-01 & 1.9e+03 \\
+                     & 24 & 3.49e+02 & 2.12e-01 & 1.6e+03 \\
+                     & 32 & 3.10e+02 & 1.82e-01 & 1.7e+03 \\
+\midrule
+\texttt{mixed\_fp16} &  8 & 6.23e+02 & 3.38e-01 & 1.8e+03 \\
+                     & 16 & 4.73e+02 & 2.30e-01 & 2.1e+03 \\
+                     & 24 & 3.49e+02 & 1.95e-01 & 1.8e+03 \\
+                     & 32 & 3.10e+02 & 1.67e-01 & 1.9e+03 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two observations stand out. First, the ratio $E_{\mathrm{sk}} / E_{\mathrm{rd}}$ is consistently above $10^3$ even for naive float16, and above $10^6$ for float32. Second, the mixed-precision configuration achieves a rounding error comparable to naive float16 (within a factor of~2) while the sketching error is identical by construction. This is consistent with the intuition that the rounding term is governed by the reduced dynamic range after sketching, not by the precision of the outer accumulation.
 
 \section{Outlook}
 
-The present report deliberately studies only the feature-sketch model $QK^T \approx QSS^TK^T$. This is sufficient for a mathematically clean first analysis. If time permits, the natural extensions are Nystr\"om-type approximations and random-feature approximations of the softmax kernel, which would connect the project more directly with the efficient-attention literature.
+The present report deliberately studies only the feature-sketch model $QK^T \approx QSS^TK^T$. This is sufficient for a mathematically clean first analysis. The natural extensions are Nystr\"om-type approximations and random-feature approximations of the softmax kernel, which would connect the project more directly with the efficient-attention literature~\autocite{XiongEtAl2021, ChoromanskiEtAl2021}.

@@ -26,10 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run mixed-precision sketched attention experiments.",
     )
-    parser.add_argument("--sequence-lengths", default="256,512", help="Comma-separated sequence lengths.")
-    parser.add_argument("--d-models", default="64,128", help="Comma-separated feature dimensions.")
-    parser.add_argument("--sketch-dims", default="16,32,48", help="Comma-separated sketch dimensions.")
-    parser.add_argument("--seeds", default="0", help="Comma-separated random seeds.")
+    parser.add_argument("--sequence-lengths", default="64,128,256", help="Comma-separated sequence lengths.")
+    parser.add_argument("--d-models", default="32,64", help="Comma-separated feature dimensions.")
+    parser.add_argument("--sketch-dims", default="8,16,24,32", help="Comma-separated sketch dimensions.")
+    parser.add_argument("--seeds", default="0,1,2", help="Comma-separated random seeds.")
     parser.add_argument("--device", default="auto", help="Torch device name, e.g. auto, cpu, cuda.")
     parser.add_argument(
         "--output",
