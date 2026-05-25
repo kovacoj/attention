@@ -1,0 +1,9 @@
+[project]
+name = "hvle"
+version = "0.1.0"
+description = "Experiments for mixed-precision randomized attention"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "torch>=2.12.0",
+]
