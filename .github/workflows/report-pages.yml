@@ -8,13 +8,11 @@ on:
     branches: [main]
     paths:
       - "report/**"
-      - "pages/**"
       - ".github/workflows/report-pages.yml"
   pull_request:
     branches: [main]
     paths:
       - "report/**"
-      - "pages/**"
       - ".github/workflows/report-pages.yml"
   workflow_dispatch:
 
@@ -46,30 +44,38 @@ jobs:
           name: report-pdf
           path: report/paper.pdf
 
-      - name: Prepare Pages site
-        run: |
-          mkdir -p site
-          cp report/paper.pdf site/report.pdf
-          cp pages/index.html site/index.html
-          touch site/.nojekyll
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
   deploy:
-    name: Deploy Pages site
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    name: Deploy to Pages branch
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: write
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Download PDF artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: report-pdf
+
+      - name: Check out deploy branch
+        uses: actions/checkout@v4
+        with:
+          ref: deploy
+          path: deploy-dir
+
+      - name: Update deploy branch
+        run: |
+          cp paper.pdf deploy-dir/report.pdf
+          cd deploy-dir
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add report.pdf
+          if git diff --cached --quiet; then
+            echo "No changes to deploy"
+          else
+            git commit -m "deploy: update report.pdf"
+            git push origin deploy
+          fi
+
+      - name: Clean up
+        run: rm -rf deploy-dir
