@@ -11,6 +11,8 @@ DTYPE_BY_NAME = {
     "float32": torch.float32,
     "float16": torch.float16,
     "bfloat16": torch.bfloat16,
+    "float8_e4m3fn": torch.float8_e4m3fn,
+    "float8_e5m2": torch.float8_e5m2,
 }
 
 
@@ -74,13 +76,21 @@ def attention_components(
         q_storage = q_storage @ sketch_storage
         k_storage = k_storage @ sketch_storage
 
-    q_compute = q_storage.to(precision.accumulation_dtype)
-    k_compute = k_storage.to(precision.accumulation_dtype)
-    v_compute = v_storage.to(precision.accumulation_dtype)
+    is_fp8_accum = precision.accumulation_dtype in (
+        torch.float8_e4m3fn, torch.float8_e5m2,
+    )
+    compute_dtype = torch.float32 if is_fp8_accum else precision.accumulation_dtype
+
+    q_compute = q_storage.to(compute_dtype)
+    k_compute = k_storage.to(compute_dtype)
+    v_compute = v_storage.to(compute_dtype)
 
     logits = (q_compute @ k_compute.transpose(-1, -2)) / math.sqrt(d_model)
-    weights = torch.softmax(logits.to(precision.softmax_dtype), dim=-1)
-    output = weights.to(precision.accumulation_dtype) @ v_compute
+    softmax_dtype = precision.softmax_dtype
+    if softmax_dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+        softmax_dtype = torch.float32
+    weights = torch.softmax(logits.to(softmax_dtype), dim=-1)
+    output = weights.to(compute_dtype) @ v_compute
     return logits, weights, output
 
 
@@ -101,6 +111,18 @@ def default_precisions() -> list[PrecisionConfig]:
         PrecisionConfig(
             label="mixed_fp16",
             storage_dtype=torch.float16,
+            accumulation_dtype=torch.float32,
+            softmax_dtype=torch.float32,
+        ),
+        PrecisionConfig(
+            label="full_fp8_e4m3",
+            storage_dtype=torch.float8_e4m3fn,
+            accumulation_dtype=torch.float8_e4m3fn,
+            softmax_dtype=torch.float32,
+        ),
+        PrecisionConfig(
+            label="mixed_fp8_e4m3",
+            storage_dtype=torch.float8_e4m3fn,
             accumulation_dtype=torch.float32,
             softmax_dtype=torch.float32,
         ),
