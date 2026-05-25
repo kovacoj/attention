@@ -1,0 +1,21 @@
+name: hvle
+
+x-workspace: &workspace
+  volumes:
+    - ..:/workspace
+  stdin_open: true
+  tty: true
+  init: true
+
+services:
+  latex:
+    <<: *workspace
+    build:
+      context: ..
+      dockerfile: containers/latex/Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+        USERNAME: ${USERNAME:-dev}
+    working_dir: /workspace/report
+    command: sleep infinity
