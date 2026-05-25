@@ -1,0 +1,44 @@
+%% Thesis type: bachelor, master, doctoral
+%% Reused by TeXtured metadata even though this document is a report.
+\newcommand*{\ThesisType}{report}
+
+%% Document title and metadata
+\newcommand*{\ThesisTitle}{Mixed-Precision Randomized Sketching for Scaled Dot-Product Attention}
+\newcommand*{\ThesisTitlePlaintext}{Mixed-Precision Randomized Sketching for Scaled Dot-Product Attention}
+\newcommand*{\ThesisTitleFront}{\ThesisTitle}
+
+%% Author
+\newcommand*{\ThesisAuthor}{J\'an Kova\v{c}ovsk\'y}
+\newcommand*{\ThesisAuthorPlaintext}{Jan Kovacovsky}
+
+%% Submission year
+\newcommand*{\YearSubmitted}{2026}
+
+%% Basic affiliation/course metadata
+\newcommand*{\University}{Charles University}
+\newcommand*{\Department}{Faculty of Mathematics and Physics}
+\newcommand*{\DeptType}{Faculty}
+\newcommand*{\Supervisor}{H. V. Le}
+\newcommand*{\SupervisorsDepartment}{Course instructor}
+\newcommand*{\StudyProgramme}{NMAG469 -- Mathematical Foundations of Machine Learning}
+\newcommand*{\ReportType}{Term Paper Draft}
+\newcommand*{\ReportCourse}{Mathematical Foundations of Machine Learning}
+\newcommand*{\ReportAffiliation}{Faculty of Mathematics and Physics, Charles University}
+
+%% Abstract
+\newcommand*{\Abstract}{%
+    This report studies the interaction between randomized sketching and mixed-precision arithmetic in scaled dot-product attention. The central approximation replaces the exact logit matrix $QK^T$ by a sketched surrogate of the form $QSS^TK^T$, where $S$ is a random projection. The goal is to compare sketching error and finite-precision error, and to determine when mixed precision remains reliable once randomized approximation is already present. The accompanying Python experiments measure logit error, attention-weight error, output error, and runtime across several sketch sizes and precision modes.
+}
+
+%% Subject (short description for PDF metadata)
+\newcommand*{\Subject}{%
+    Mixed precision and randomized sketching for transformer attention.
+}
+
+%% Keywords (about 3-7)
+\newcommand*{\Keywords}{%
+    mixed-precision arithmetic, randomized numerical linear algebra, attention, transformers, sketching
+}
+\newcommand*{\KeywordsPlaintext}{%
+    mixed-precision arithmetic, randomized numerical linear algebra, attention, transformers, sketching
+}

@@ -1,0 +1,79 @@
+\section{Introduction}
+
+Attention is a natural place to connect transformer models with randomized numerical linear algebra and finite-precision arithmetic. The central map is
+\[
+    A(Q,K,V) = \operatorname{softmax}\left(\frac{QK^T}{\sqrt{d}}\right)V,
+\]
+where the dominant cost comes from forming the logit matrix $QK^T$ and then applying the rowwise softmax. This makes attention a good test case for two approximation ideas that are already important in modern machine learning systems: randomized dimension reduction and reduced-precision arithmetic.
+
+This report focuses on a single attention block rather than full transformer training. That scope is small enough for a short paper, but still rich enough to support both a mathematical discussion and numerical experiments.
+
+\section{Mathematical Setup}
+
+Let $Q,K,V \in \mathbb{R}^{n \times d}$ and let $S \in \mathbb{R}^{d \times s}$ be a random sketching matrix with $s < d$. The main approximation studied here is
+\[
+    QK^T \approx QSS^TK^T,
+\]
+which leads to the sketched attention rule
+\[
+    \widetilde{A}(Q,K,V) = \operatorname{softmax}\left(\frac{QSS^TK^T}{\sqrt{d}}\right)V.
+\]
+
+The motivating idea is that the sketch compresses the feature dimension before the expensive matrix product is formed. The report will treat the resulting error as a combination of two effects:
+\begin{enumerate}
+    \item approximation error introduced by sketching,
+    \item rounding error introduced by finite-precision arithmetic.
+\end{enumerate}
+
+\section{Precision Models}
+
+The numerical experiments compare the following computation modes:
+\begin{itemize}
+    \item full \texttt{float64} reference,
+    \item full \texttt{float32},
+    \item naive \texttt{float16},
+    \item mixed precision with \texttt{float16} storage and \texttt{float32} accumulation,
+    \item sketched variants of the same precision modes.
+\end{itemize}
+
+This separation is useful because naive low precision and mixed precision often behave very differently once softmax is involved.
+
+\section{Experimental Design}
+
+The current Python code runs sweeps over:
+\begin{itemize}
+    \item sequence length $n$,
+    \item feature dimension $d$,
+    \item sketch dimension $s$,
+    \item precision mode,
+    \item random seed.
+\end{itemize}
+
+For each run, the code reports:
+\begin{itemize}
+    \item relative Frobenius error of the attention logits,
+    \item mean rowwise $\ell_1$ error of the attention weights,
+    \item relative Frobenius error of the attention output,
+    \item runtime.
+\end{itemize}
+
+The main empirical question is whether, for a moderate sketch size, the sketching error already dominates the total error so strongly that mixed precision adds only a small extra loss while still giving a practical computational advantage.
+
+\section{Results Plan}
+
+The report will develop the numerical section around three comparisons:
+\begin{enumerate}
+    \item full attention versus sketched attention,
+    \item \texttt{float32} versus naive \texttt{float16},
+    \item naive low precision versus mixed precision with higher-precision accumulation.
+\end{enumerate}
+
+This should be enough to support a short but coherent conclusion about when randomized sketching and mixed precision interact favorably.
+
+\section{Discussion}
+
+The project sits naturally between several themes of the lecture notes: dimension reduction, kernel-style matrix constructions, transformer attention, and computational approximations used in large-scale learning systems. Its main advantage as a term-paper topic is that it stays close to an analytically transparent formula while still touching a modern deep learning mechanism.
+
+\section{Conclusion}
+
+The working hypothesis is that randomized sketching can make mixed-precision attention more attractive, because once a controlled approximation is introduced at the linear algebra level, careful mixed precision may contribute only a secondary error term. The experiments in this repository are meant to test that claim directly.

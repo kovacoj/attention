@@ -1,0 +1,38 @@
+\newcommand*{\TeXturedVERSION}{1.5.1}
+
+%% Enable built-in LaTeX support for PDF/A compliance.
+\IfFileExists{pdfmanagement.sty}{%
+    \RequirePackage{pdfmanagement}
+    \SetKeys[document/metadata]{pdfversion=1.7, pdfstandard=A-2u}
+    \input{preamble/pdfA-compliance/glyphtounicode}
+}{}
+
+\documentclass[11pt,a4paper]{report}
+
+%% TeXtured toggles
+\input{preamble/toggles}
+% \FANCYfalse
+% \WIPtrue
+% \EXTRAMARGINtrue
+% \LINKBOXESfalse
+
+%% Preamble
+\input{preamble/main}
+
+%% For a report, section numbering should not depend on chapters.
+\renewcommand*{\thesection}{\arabic{section}}
+\renewcommand*{\thesubsection}{\thesection.\arabic{subsection}}
+\setcounter{secnumdepth}{2}
+
+\begin{document}
+
+\pagenumbering{arabic}
+\input{frontmatter/report-title}
+
+% \tableofcontents
+
+\input{chapters/Report}
+
+% \references
+
+\end{document}
