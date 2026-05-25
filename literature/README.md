@@ -2,6 +2,12 @@
 
 This folder contains a small working set of papers for the report on mixed-precision randomized sketching for scaled dot-product attention.
 
+## Canonical transformer reference
+
+- `vaswani-et-al2017-attention-is-all-you-need.pdf`
+  Ashish Vaswani et al., *Attention Is All You Need*.
+  Why useful: the canonical source for the transformer architecture and the standard scaled dot-product attention formula studied in the report.
+
 ## Core mixed-precision reference
 
 - `micikevicius2018-mixed-precision-training.pdf`
