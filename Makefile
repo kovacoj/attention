@@ -1,4 +1,4 @@
-COMPOSE := docker compose -f containers/compose.yaml
+COMPOSE := docker compose -f docker-compose.yaml
 
 .PHONY: containers-build latex-shell report
 
@@ -9,4 +9,7 @@ latex-shell:
 	$(COMPOSE) run --rm latex bash
 
 report:
-	./bin/latex-build
+	@set -e; \
+	if ! $(COMPOSE) run --rm latex latexmk paper.tex; then \
+		$(COMPOSE) run --rm latex latexmk -g paper.tex; \
+	fi

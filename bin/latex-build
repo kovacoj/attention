@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-latexmk=(docker compose -f "$repo_root/containers/compose.yaml" run --rm latex latexmk)
-
-if ! "${latexmk[@]}" paper "$@"; then
-  "${latexmk[@]}" -g paper "$@"
-fi
