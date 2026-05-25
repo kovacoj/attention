@@ -1,4 +1,6 @@
 .venv/
+uv.lock
+*.swp
 
 # Python
 __pycache__/
