@@ -1,20 +1,20 @@
 \section{Introduction}
 
-Transformer models~\autocite{Vaswani2017} rely on scaled dot-product attention, an operator whose quadratic cost in the sequence length has motivated a family of approximation strategies. Two strands are particularly relevant. The first, rooted in randomized numerical linear algebra~\autocite{HalkoMartinssonTropp2011, Mahoney2016}, replaces the full attention matrix by a sketched surrogate~\autocite{WangEtAl2020, XiongEtAl2021, ChoromanskiEtAl2021}. The second, driven by hardware constraints, carries out the computation in reduced precision~\autocite{MicikeviciusEtAl2018}.
+The purpose of this report is to study one analytically transparent component of the transformer architecture~\autocite{Vaswani2017}: scaled dot-product attention. Two strands are particularly relevant. The first, rooted in randomized numerical linear algebra~\autocite{HalkoMartinssonTropp2011, Mahoney2016}, replaces the full attention matrix by a sketched surrogate~\autocite{WangEtAl2020, XiongEtAl2021, ChoromanskiEtAl2021}. The second, driven by hardware constraints, carries out the computation in reduced precision~\autocite{MicikeviciusEtAl2018}.
 
-These two approximation strategies are typically studied in isolation. This report asks what happens when they are composed: if the attention logits are first compressed by a randomized sketch, can the subsequent computation be carried out in mixed precision with only a lower-order loss of accuracy?
+These two approximation strategies are typically studied in isolation. This report asks what happens when they are composed: when the query-key logit computation is approximated by a randomized sketch, can the subsequent computation be carried out in mixed precision with only a lower-order loss of accuracy?
 
 The answer, as we show, is yes---and the mechanism is precise. Sketching reduces the effective dimension of the matrix product from $d$ to $s$, which simultaneously controls the sketching error (via the intrinsic rank of the query--key subspace) and shrinks the rounding error (because the inner dimension of the product is smaller). The main result (Theorem~\ref{thm:main}) gives an explicit total error bound and identifies the condition $s \cdot u \ll \varepsilon$ under which the rounding term is lower order, where $s$ is the sketch dimension, $u$ is the unit roundoff, and $\varepsilon$ is the sketch tolerance. This condition provides a concrete design rule: sketch dimension and precision should be chosen jointly, not independently.
 
 \section{Operator-Theoretic Setup}
 
-Let $\mathcal{H}_d := \mathbb{R}^d$ and $\mathcal{H}_n := \mathbb{R}^n$, both endowed with their standard Euclidean inner products. We identify matrices in $\mathbb{R}^{n \times d}$ with Hilbert--Schmidt operators
+Let $\mathcal{H}_d := \mathbb{R}^d$ and $\mathcal{H}_n := \mathbb{R}^n$, both finite-dimensional Hilbert spaces endowed with their standard Euclidean inner products. We view matrices in $\mathbb{R}^{n \times d}$ as Hilbert--Schmidt operators
 \[
     Q,K,V : \mathcal{H}_d \to \mathcal{H}_n.
 \]
 Their Hilbert--Schmidt norm is denoted by $\|\cdot\|_{\mathrm{HS}}$, while $\|\cdot\|_2$ denotes the spectral norm on linear operators.
 
-The exact logit operator is
+The exact scaled logit matrix, viewed as an operator on $\mathcal{H}_n$, is
 \[
     \mathcal{L}(Q,K) := d^{-1/2} QK^* \in \mathcal{L}(\mathcal{H}_n),
 \]
@@ -130,7 +130,9 @@ The next proposition isolates the deterministic sketching error.
     Using $\|K^*\|_2 = \|K\|_2$ proves the first estimate. The second follows from the previous proposition.
 \end{proof}
 
-This reduces the sketching analysis to a single geometric requirement on the projector $P_S$. In the randomized setting, the role of randNLA is to choose $S$ so that this requirement holds with high probability on a subspace that captures the geometry of the rows of $Q$ and $K$.
+The proposition should be read as a conditional stability statement: it does not assert that a rank-$s$ Gaussian sketch is an approximate identity on an arbitrary $d$-dimensional subspace. Rather, it separates the attention-stability argument from the probabilistic question of when the sketch preserves the relevant row geometry.
+
+This reduces the sketching analysis to a single geometric requirement on the finite-rank operator $P_S$. (Note that $P_S = SS^*$ is positive semidefinite and has rank at most $s$, but it is not an orthogonal projector unless the columns of $S$ are orthonormal.) In the randomized setting, the role of randNLA is to choose $S$ so that this requirement holds with high probability on a subspace that captures the geometry of the rows of $Q$ and $K$.
 
 The next result makes this probabilistic. It shows that a Gaussian sketch of dimension $s = O(r/\varepsilon^2)$ suffices, where $r$ is the intrinsic rank of the query--key row space---not the ambient dimension $d$.
 
@@ -166,15 +168,15 @@ The next result makes this probabilistic. It shows that a Gaussian sketch of dim
 
 The key feature is the dependence on $r$ rather than $d$: when the query--key rows lie near a low-dimensional subspace, a much smaller sketch suffices.
 
-We now turn to the rounding error. The standard Higham-type forward-error analysis~\autocite{Higham2002} for the matrix product $AB$ with $A \in \mathbb{R}^{n \times s}$, $B \in \mathbb{R}^{s \times n}$ gives
+We now turn to the finite-precision error. The standard Higham-type forward-error analysis~\autocite{Higham2002} for the matrix product $AB$ with $A \in \mathbb{R}^{n \times s}$, $B \in \mathbb{R}^{s \times n}$ gives
 \[
     |\widehat{AB} - AB| \leq \gamma_s\, |A|\,|B|,
     \qquad
     \gamma_s := \frac{su}{1 - su},
 \]
-where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)^*$, the inner dimension is $s$, so the rounding error is proportional to $s \cdot u$---not $d \cdot u$ as it would be for the full product $QK^*$.
+where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)^*$, the inner dimension is $s$, so the finite-precision error is proportional to $s \cdot u$---not $d \cdot u$ as it would be for the full product $QK^*$.
 
-\begin{proposition}[Rounding error for sketched logits]
+\begin{proposition}[Finite-precision error for sketched logits]
     \label{prop:rounding}
     Let $\widehat{\mathcal{L}}_S(Q,K)$ denote the logit matrix computed in floating-point arithmetic with unit roundoff $u$, and let $\gamma_s := su/(1-su)$ for $su < 1$. Then
     \[
@@ -204,9 +206,9 @@ where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)
     where the last step uses $\||A|\,|B^T|\|_{\mathrm{HS}} \leq \|A\|_2\,\|B\|_2\,\sqrt{n}$ (each row of $|A|$ has norm at most $\|A\|_2$, and similarly for $|B^T|$). Multiplying by $d^{-1/2}$ yields the logit bound. The attention-output bound follows from Proposition~1.
 \end{proof}
 
-The factor $\gamma_s$ scales linearly with $s$: sketching reduces the rounding error by a factor of $s/d$ compared to the unsketched product. This is the formal statement of the intuition that ``compressing first makes low precision safer.''
+The factor $\gamma_s$ scales linearly with $s$: sketching reduces the finite-precision error by a factor of $s/d$ compared to the unsketched product. This is the formal statement of the intuition that ``compressing first makes low precision safer.''
 
-Combining the probabilistic sketching guarantee with the rounding error analysis yields the main result.
+Combining the probabilistic sketching guarantee with the finite-precision error analysis yields the main result.
 
 \begin{theorem}[Mixed-precision sketched attention]
     \label{thm:main}
@@ -222,7 +224,7 @@ Combining the probabilistic sketching guarantee with the rounding error analysis
         \Bigr)
         \|V\|_2.
     \]
-    The first term is the sketching error; the second is the rounding error. The rounding term is lower order whenever $s \cdot u \ll \varepsilon$.
+    The first term is the sketching error; the second is the finite-precision error. The finite-precision term is lower order whenever $s \cdot u \ll \varepsilon$.
 \end{theorem}
 
 \begin{proof}
@@ -232,11 +234,11 @@ Combining the probabilistic sketching guarantee with the rounding error analysis
         \leq
         \bigl(\|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}} + \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}\bigr)\,\|V\|_2.
     \]
-    Apply Proposition~2 to the first term and Proposition~\ref{prop:rounding} to the second. For the lower-order claim, observe that $\gamma_s = O(s \cdot u)$ and $\|QS\|_2, \|KS\|_2 = O(\sqrt{\|Q\|_2\,\|K\|_2})$, so the rounding term is $O(s \cdot u \cdot \sqrt{n}\,\|Q\|_2\,\|K\|_2/\sqrt{d})$ while the sketching term is $\Theta(\varepsilon\,\|Q\|_{\mathrm{HS}}\,\|K\|_2/\sqrt{d})$. The condition $s \cdot u \ll \varepsilon$ ensures the rounding term is dominated.
+    Apply Proposition~2 to the first term and Proposition~\ref{prop:rounding} to the second. For the lower-order claim, observe that $\gamma_s = O(s \cdot u)$ and $\|QS\|_2, \|KS\|_2 = O(\sqrt{\|Q\|_2\,\|K\|_2})$, so the rounding term is $O(s \cdot u \cdot \sqrt{n}\,\|Q\|_2\,\|K\|_2/\sqrt{d})$ while the sketching term is $\Theta(\varepsilon\,\|Q\|_{\mathrm{HS}}\,\|K\|_2/\sqrt{d})$.     The condition $s \cdot u \ll \varepsilon$ ensures the finite-precision term is dominated.
 \end{proof}
 
 \begin{remark}[Design rule]
-    Theorem~\ref{thm:main} yields a concrete joint design rule. For unit roundoffs $u_{16} \approx 5 \times 10^{-4}$ (float16) and $u_{32} \approx 6 \times 10^{-8}$ (float32), the condition $s \cdot u \ll \varepsilon$ is satisfied for all practical sketch dimensions ($s \leq 128$) and tolerances ($\varepsilon \geq 0.01$). This means that in the typical operating regime, the rounding error is negligible and the total accuracy is governed entirely by the sketch dimension. The rule also reveals a regime to avoid: if $s$ is chosen too large relative to $1/u$, the rounding error can overtake the sketching error, defeating the purpose of mixed precision.
+    Theorem~\ref{thm:main} yields a concrete joint design rule. For unit roundoffs $u_{16} \approx 5 \times 10^{-4}$ (float16) and $u_{32} \approx 6 \times 10^{-8}$ (float32), the condition $s \cdot u \ll \varepsilon$ is satisfied for all practical sketch dimensions ($s \leq 128$) and tolerances ($\varepsilon \geq 0.01$). This means that in the typical operating regime, the finite-precision error is negligible and the total accuracy is governed entirely by the sketch dimension. The rule also reveals a regime to avoid: if $s$ is chosen too large relative to $1/u$, the finite-precision error can overtake the sketching error, defeating the purpose of mixed precision.
 \end{remark}
 
 \section{Numerical Experiments}
@@ -249,18 +251,18 @@ The experiments probe the decomposition of Theorem~\ref{thm:main} directly. For 
 \end{enumerate}
 The sketching term is $\|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$ and the rounding term is $\|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$, both measured in Hilbert--Schmidt norm. The same decomposition is recorded for the attention output. We test three precision configurations: \texttt{full\_fp32} (all stages in float32), \texttt{full\_fp16} (all stages in float16), and \texttt{mixed\_fp16} (storage in float16, accumulation and softmax in float32).
 
-The sketch $S \in \mathbb{R}^{d \times s}$ is a scaled Gaussian matrix with i.i.d.\ $\mathcal{N}(0, 1/s)$ entries. We sweep $n \in \{64, 128, 256\}$, $d \in \{32, 64\}$, $s \in \{8, 16, 24, 32\}$, and average over three seeds.
+The sketch $S \in \mathbb{R}^{d \times s}$ is a scaled Gaussian matrix with i.i.d.\ $\mathcal{N}(0, 1/s)$ entries; the scaling is chosen so that $\mathbb{E}[SS^*] = I_d$. We sweep $n \in \{64, 128, 256\}$, $d \in \{32, 64\}$, $s \in \{8, 16, 24, 32\}$, and average over three seeds.
 
-Table~1 reports the HS errors of the logits for $d = 64$; the output errors follow the same pattern and are omitted for brevity. The sketching term is 3--4 orders of magnitude larger than the rounding term under \texttt{full\_fp32}, and 1--2 orders larger under \texttt{full\_fp16} and \texttt{mixed\_fp16}. In all tested regimes the total error $\|\mathcal{L} - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$ is dominated by the sketching term, confirming the hypothesis of Theorem~\ref{thm:main}.
+Table~1 reports the HS errors of the logits for $n = 256$, $d = 64$; the output errors showed the same qualitative ordering and are not reproduced in the table. The sketching term is 3--4 orders of magnitude larger than the finite-precision term under \texttt{full\_fp32}, and 1--2 orders larger under \texttt{full\_fp16} and \texttt{mixed\_fp16}. In all tested regimes the total error $\|\mathcal{L} - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$ is dominated by the sketching term, confirming the hypothesis of Theorem~\ref{thm:main}.
 
 \begin{table}[ht]
 \centering
-\caption{Hilbert--Schmidt errors of the logit matrix ($d = 64$, averaged over 3 seeds). Sketching error $E_{\mathrm{sk}} := \|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$; rounding error $E_{\mathrm{rd}} := \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$; ratio $E_{\mathrm{sk}} / E_{\mathrm{rd}}$.}
+\caption{Hilbert--Schmidt errors of the logit matrix ($n = 256$, $d = 64$, averaged over 3 seeds). Sketching error $E_{\mathrm{sk}} := \|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$; finite-precision error $E_{\mathrm{fp}} := \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$; ratio $E_{\mathrm{sk}} / E_{\mathrm{fp}}$.}
 \label{tab:results}
 \small
 \begin{tabular}{ll rrr}
 \toprule
-Configuration & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{rd}}$ & $E_{\mathrm{sk}} / E_{\mathrm{rd}}$ \\
+Configuration & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{fp}}$ & $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ \\
 \midrule
 \texttt{full\_fp32}  &  8 & 6.23e+02 & 9.92e-05 & 6.3e+06 \\
                      & 16 & 4.73e+02 & 9.79e-05 & 4.8e+06 \\
@@ -280,7 +282,7 @@ Configuration & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{rd}}$ & $E_{\mathrm{sk}} /
 \end{tabular}
 \end{table}
 
-Two observations stand out. First, the ratio $E_{\mathrm{sk}} / E_{\mathrm{rd}}$ is consistently above $10^3$ even for naive float16, and above $10^6$ for float32. This is consistent with the $s \cdot u \ll \varepsilon$ condition: for $s = 32$ and $u_{16} \approx 5 \times 10^{-4}$, we have $s \cdot u_{16} \approx 0.016$, while the effective $\varepsilon$ from the sketch is on the order of $0.5$--$1.0$. Second, the mixed-precision configuration achieves a rounding error comparable to naive float16 (within a factor of~2) while the sketching error is identical by construction. This is consistent with Proposition~\ref{prop:rounding}: the rounding error is governed by the inner dimension $s$ of the product, not by the ambient dimension $d$.
+Two observations stand out. First, $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ is consistently large in the tested regimes, indicating that the dominant error source is the randomized sketch rather than finite precision. Second, mixed precision and naive float16 have finite-precision errors of the same order. This suggests that, for these small synthetic experiments, storage quantization and the sketch itself dominate any benefit from higher-precision accumulation. Thus the experiments support the error decomposition, but they do not by themselves show a strong advantage of mixed precision over naive float16.
 
 \section{Outlook}
 
