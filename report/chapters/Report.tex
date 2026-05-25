@@ -284,6 +284,87 @@ Configuration & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{fp}}$ & $E_{\mathrm{sk}} /
 
 Two observations stand out. First, $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ is consistently large in the tested regimes, indicating that the dominant error source is the randomized sketch rather than finite precision. Second, mixed precision and naive float16 have finite-precision errors of the same order. This suggests that, for these small synthetic experiments, storage quantization and the sketch itself dominate any benefit from higher-precision accumulation. Thus the experiments support the error decomposition, but they do not by themselves show a strong advantage of mixed precision over naive float16.
 
+\section{Infinite-Dimensional Limit}
+
+The finite-dimensional analysis above has a natural extension to compact operators on separable Hilbert spaces, which clarifies how the sketching error depends on the spectral decay of the query--key covariance rather than on any ambient dimension.
+
+\subsection{Setup}
+
+Let $\mathcal{H}$ and $\mathcal{K}$ be separable Hilbert spaces. We consider compact operators
+\[
+    Q, K : \mathcal{H} \to \mathcal{K},
+\]
+with Hilbert--Schmidt adjoints $Q^*, K^* : \mathcal{K} \to \mathcal{H}$. The logit operator is
+\[
+    \mathcal{L} = d^{-1/2}\, QK^* \in \mathcal{L}(\mathcal{K}),
+\]
+where $d > 0$ is a scaling parameter (the embedding dimension in the finite case). The attention output is $\mathcal{A} := \Sigma(\mathcal{L})V$ for a compact $V : \mathcal{H} \to \mathcal{K}$, with $\Sigma$ defined rowwise as before (now acting on the matrix elements of $\mathcal{L}$ in any fixed orthonormal basis of $\mathcal{K}$).
+
+\subsection{Spectral structure}
+
+Since $Q$ and $K$ are compact, their singular value decompositions converge:
+\[
+    Q = \sum_{j=1}^{\infty} \sigma_j(Q)\, u_j \otimes v_j,
+    \qquad
+    K = \sum_{j=1}^{\infty} \sigma_j(K)\, w_j \otimes z_j,
+\]
+where $\{\sigma_j\} \in \ell^2$ are the singular values (arranged in nonincreasing order) and $\{u_j\}, \{v_j\}, \{w_j\}, \{z_j\}$ are orthonormal systems. The combined row space
+\[
+    \mathcal{U} := \overline{\operatorname{span}}\{v_j, z_j : j \geq 1\} \subseteq \mathcal{H}
+\]
+is the infinite-dimensional analogue of the subspace $U$ in Proposition~2.
+
+\subsection{Finite-rank approximation}
+
+Let $\{P_s\}_{s=1}^{\infty}$ be an increasing sequence of finite-rank orthogonal projections on $\mathcal{H}$ with $P_s \to I$ strongly on $\mathcal{U}$. (In the finite-dimensional setting, $P_s = SS^*$ plays this role after orthogonalisation.) The sketched logit operator is
+\[
+    \widetilde{\mathcal{L}}_s := d^{-1/2}\, QP_s K^*.
+\]
+
+\begin{proposition}[Spectral convergence of sketched attention]
+    \label{prop:spectral}
+    Let $\varepsilon_s := \|(I - P_s)|_{\mathcal{U}}\|_2$ and suppose $\varepsilon_s \to 0$ as $s \to \infty$. Then:
+    \begin{enumerate}
+        \item $\|\mathcal{L} - \widetilde{\mathcal{L}}_s\|_{\mathrm{HS}} \leq d^{-1/2}\,\varepsilon_s\,\|Q\|_{\mathrm{HS}}\,\|K\|_2$.
+        \item $\|\mathcal{A} - \widetilde{\mathcal{A}}_s\|_{\mathrm{HS}} \leq d^{-1/2}\,\varepsilon_s\,\|Q\|_{\mathrm{HS}}\,\|K\|_2\,\|V\|_2$.
+        \item If the singular values of $Q$ and $K$ decay as $\sigma_j(Q), \sigma_j(K) = O(j^{-\alpha})$ for some $\alpha > 1/2$, then choosing $P_s$ to project onto the leading $s$ singular vectors yields
+        \[
+            \varepsilon_s = O(s^{-\alpha+1/2}),
+        \]
+        and consequently $\|\mathcal{A} - \widetilde{\mathcal{A}}_s\|_{\mathrm{HS}} \to 0$ at rate $O(s^{-\alpha+1/2})$.
+    \end{enumerate}
+\end{proposition}
+
+\begin{proof}
+    Claims (i) and (ii) are identical to Proposition~2, with the same proof: the compactness of $Q$ and $K$ ensures that the Hilbert--Schmidt norms are finite, and the approximate-identity bound $\|Q(I - P_s)\|_{\mathrm{HS}} \leq \varepsilon_s \|Q\|_{\mathrm{HS}}$ follows from the definition of $\varepsilon_s$.
+
+    For claim (iii), let $P_s$ project onto $\operatorname{span}\{v_1, \ldots, v_s, z_1, \ldots, z_s\}$. Then for any $u \in \mathcal{U}$, writing $u = \sum_{j=1}^{\infty} \alpha_j v_j + \sum_{j=1}^{\infty} \beta_j z_j$ with $\sum \alpha_j^2 + \beta_j^2 = \|u\|^2$, we have
+    \[
+        \|(I - P_s)u\|^2 = \sum_{j > s} \alpha_j^2 + \sum_{j > s} \beta_j^2.
+    \]
+    The worst case over unit vectors is bounded by the spectral decay: by the Courant--Fischer minimax principle, $\varepsilon_s^2 \leq \max(\sigma_{s+1}^2(Q), \sigma_{s+1}^2(K))$. Under the power-law decay $\sigma_j = O(j^{-\alpha})$, this gives $\varepsilon_s = O(s^{-\alpha+1/2})$.
+\end{proof}
+
+\begin{remark}[Interpretation]
+    Proposition~\ref{prop:spectral} shows that the convergence rate of sketched attention is entirely governed by the spectral decay of $Q$ and $K$. When the singular values decay rapidly (e.g., exponentially, as is typical for smooth kernels), the finite-rank approximation converges spectrally fast, and the sketch dimension $s$ can be much smaller than any notion of ambient dimension. The $\alpha > 1/2$ condition is precisely the requirement that $Q$ and $K$ be Hilbert--Schmidt class, i.e.\ that $\sum_j \sigma_j^2 < \infty$.
+\end{remark}
+
+\begin{remark}[Randomised sketch in the infinite limit]
+    In the finite-dimensional case, a Gaussian sketch $S \in \mathbb{R}^{d \times s}$ with $s = O(r/\varepsilon^2)$ achieves $\varepsilon_s \leq \varepsilon$ with high probability (Proposition~4). In the infinite-dimensional limit, the role of $r$ is played by the \emph{effective rank} $\rho_\alpha := \sum_{j=1}^{\infty} \sigma_j^{2\alpha}$, which is finite whenever $\alpha > 1/2$. The required sketch dimension then scales as $s = O(\rho_\alpha / \varepsilon^2)$, independent of any ambient dimension. This gives the infinite-dimensional analogue of Theorem~\ref{thm:main}: under the same finite-precision model, the total error satisfies
+    \[
+        \|\mathcal{A} - \widehat{\mathcal{A}}_s\|_{\mathrm{HS}}
+        \leq
+        \frac{1}{\sqrt{d}}
+        \Bigl(
+            \varepsilon\, \|Q\|_{\mathrm{HS}}\,\|K\|_2
+            +
+            \gamma_s\, \|QP_s\|_2\,\|P_sK\|_2\,\sqrt{n}
+        \Bigr)
+        \|V\|_2
+    \]
+    with probability at least $1 - \delta$ when $s \geq O(\rho_\alpha / \varepsilon^2 + \ln(1/\delta) / \varepsilon^2)$, and the finite-precision term remains lower order when $s \cdot u \ll \varepsilon$.
+\end{remark}
+
 \section{Outlook}
 
-The present report studies only the feature-sketch model $QK^T \approx QSS^TK^T$. The natural extensions are Nystr\"om-type approximations and random-feature approximations of the softmax kernel, which would connect the project more directly with the efficient-attention literature~\autocite{XiongEtAl2021, ChoromanskiEtAl2021}. Another direction is to replace the Gaussian sketch by a structured random matrix (e.g., a subsampled randomized Hadamard transform), which would yield the same probabilistic guarantees with lower computational cost.
+The present report studies only the feature-sketch model $QK^* \approx QSS^*K^*$. The natural extensions are Nystr\"om-type approximations and random-feature approximations of the softmax kernel, which would connect the project more directly with the efficient-attention literature~\autocite{XiongEtAl2021, ChoromanskiEtAl2021}. Another direction is to replace the Gaussian sketch by a structured random matrix (e.g., a subsampled randomized Hadamard transform), which would yield the same probabilistic guarantees with lower computational cost.
