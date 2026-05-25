@@ -1,0 +1,72 @@
+name: Build report and deploy Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "report/**"
+      - "pages/**"
+      - ".github/workflows/report-pages.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "report/**"
+      - "pages/**"
+      - ".github/workflows/report-pages.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compile LaTeX report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Compile report PDF
+        uses: xu-cheng/latex-action@v3
+        with:
+          working_directory: report
+          root_file: paper.tex
+          texlive_version: latest
+          extra_system_packages: coreutils icu inkscape ghostscript perl sed findutils
+
+      - name: Upload PDF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-pdf
+          path: report/paper.pdf
+
+      - name: Prepare Pages site
+        run: |
+          mkdir -p site
+          cp report/paper.pdf site/report.pdf
+          cp pages/index.html site/index.html
+          touch site/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy Pages site
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
