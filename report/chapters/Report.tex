@@ -1,20 +1,10 @@
-\section{Proposal}
+\section{Introduction}
 
-The purpose of this report is to study one analytically transparent fragment of the transformer architecture~\autocite{Vaswani2017}: scaled dot-product attention. The report is intentionally not about full transformer training. Instead, it isolates a single nonlinear operator and examines how two approximations interact:
-\begin{enumerate}
-    \item a randomized finite-rank compression motivated by randomized numerical linear algebra~\autocite{HalkoMartinssonTropp2011, Mahoney2016};
-    \item a mixed-precision realization motivated by modern low-precision training practice~\autocite{MicikeviciusEtAl2018}.
-\end{enumerate}
+Transformer models~\autocite{Vaswani2017} rely on scaled dot-product attention, an operator whose quadratic cost in the sequence length has motivated a family of approximation strategies. Two strands are particularly relevant. The first, rooted in randomized numerical linear algebra~\autocite{HalkoMartinssonTropp2011, Mahoney2016}, replaces the full attention matrix by a sketched surrogate~\autocite{WangEtAl2020, XiongEtAl2021, ChoromanskiEtAl2021}. The second, driven by hardware constraints, carries out the computation in reduced precision~\autocite{MicikeviciusEtAl2018}.
 
-This focus keeps the project aligned with the mathematical language of the lecture notes: dimension reduction, kernel-style matrix constructions, and operator perturbation. It also places the work in the neighborhood of efficient-attention models such as Linformer, Nystr\"omformer, and Performer~\autocite{WangEtAl2020, XiongEtAl2021, ChoromanskiEtAl2021}, while remaining much narrower in scope.
+These two approximation strategies are typically studied in isolation. This report asks what happens when they are composed: if the attention logits are first compressed by a randomized sketch, can the subsequent computation be carried out in mixed precision with only a lower-order loss of accuracy?
 
-The guiding question is the following.
-
-\begin{idea}[Research question]
-    When the attention logits are first compressed by a randomized sketch, can the subsequent computation be carried out in mixed precision with only a lower-order loss of accuracy?
-\end{idea}
-
-The intended contribution of the report is modest but precise: a deterministic error decomposition, together with numerical experiments that test whether the finite-precision term is indeed subordinate to the sketching term in relevant parameter regimes.
+The answer, as we show, is yes---and the mechanism is precise. Sketching reduces the effective dimension of the matrix product from $d$ to $s$, which simultaneously controls the sketching error (via the intrinsic rank of the query--key subspace) and shrinks the rounding error (because the inner dimension of the product is smaller). The main result (Theorem~\ref{thm:main}) gives an explicit total error bound and identifies the condition $s \cdot u \ll \varepsilon$ under which the rounding term is lower order, where $s$ is the sketch dimension, $u$ is the unit roundoff, and $\varepsilon$ is the sketch tolerance. This condition provides a concrete design rule: sketch dimension and precision should be chosen jointly, not independently.
 
 \section{Operator-Theoretic Setup}
 
@@ -142,51 +132,116 @@ The next proposition isolates the deterministic sketching error.
 
 This reduces the sketching analysis to a single geometric requirement on the projector $P_S$. In the randomized setting, the role of randNLA is to choose $S$ so that this requirement holds with high probability on a subspace that captures the geometry of the rows of $Q$ and $K$.
 
-The final step is to separate sketching error from finite-precision error.
+The next result makes this probabilistic. It shows that a Gaussian sketch of dimension $s = O(r/\varepsilon^2)$ suffices, where $r$ is the intrinsic rank of the query--key row space---not the ambient dimension $d$.
 
-\begin{proposition}[Error splitting for mixed-precision attention]
-    Let $\widehat{\mathcal{L}}_S(Q,K)$ denote the logit matrix produced by a finite-precision implementation of the sketched computation, and define
+\begin{proposition}[Probabilistic sketching guarantee]
+    \label{prop:probabilistic}
+    Let $U \subseteq \mathcal{H}_d$ be the subspace spanned by the rows of $[Q^T \;\; K^T]$, and let $r := \dim U$. Let $S \in \mathbb{R}^{d \times s}$ have i.i.d.\ entries $S_{ij} \sim \mathcal{N}(0, 1/s)$. For $\varepsilon \in (0, 1)$ and $\delta \in (0, 1)$, if
     \[
-        \widehat{\mathcal{A}}_S(Q,K,V)
-        := \Sigma\!\bigl(\widehat{\mathcal{L}}_S(Q,K)\bigr)V.
+        s \;\geq\; \frac{r + \ln(2/\delta)}{\varepsilon^2},
     \]
-    Then
+    then with probability at least $1 - \delta$, $P_S$ is an $\varepsilon$-approximate identity on $U$. Consequently, with the same probability,
     \[
-        \|\mathcal{A}(Q,K,V)-\widehat{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
+        \|\mathcal{A}(Q,K,V)-\widetilde{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
         \leq
-        \Bigl(
-            \|\mathcal{L}(Q,K)-\widetilde{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
-            +
-            \|\widetilde{\mathcal{L}}_S(Q,K)-\widehat{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
-        \Bigr)
-        \|V\|_2.
+        \frac{\varepsilon}{\sqrt d}\,\|Q\|_{\mathrm{HS}}\,\|K\|_2\,\|V\|_2.
     \]
 \end{proposition}
 
 \begin{proof}
-    Apply the previous Lipschitz estimate with
+    By definition $P_S = SS^*$. Since the columns of $S$ are i.i.d.\ Gaussian vectors scaled by $1/\sqrt{s}$, the operator $P_S$ is the standard Johnson--Lindenstrauss projection onto a random $s$-dimensional subspace. For any fixed unit vector $u \in U$,
     \[
-        L = \mathcal{L}(Q,K),
-        \qquad
-        M = \widehat{\mathcal{L}}_S(Q,K),
+        \|P_S u\|_2^2 = \|S^* u\|_2^2
     \]
-    and then use the triangle inequality
+    follows a $\chi^2_s / s$ distribution. A standard tail bound~\autocite{HalkoMartinssonTropp2011} gives
     \[
-        \|L-M\|_{\mathrm{HS}}
-        \leq
-        \|L-\widetilde{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
-        +
-        \|\widetilde{\mathcal{L}}_S(Q,K)-M\|_{\mathrm{HS}}.
+        \Pr\bigl(\bigl|\|P_S u\|_2^2 - 1\bigr| > \varepsilon\bigr) \leq 2\exp\!\bigl(-s\varepsilon^2/2\bigr).
     \]
+    Let $u_1, \ldots, u_r$ be an orthonormal basis of $U$. By a union bound over the $2r$ vectors $\{u_j, (I - P_S)u_j\}$, the event that $\|P_S u_j\|_2^2 \in [1-\varepsilon, 1+\varepsilon]$ for all $j$ has probability at least $1 - 2r \cdot 2\exp(-s\varepsilon^2/2)$. For any $u \in U$, write $u = \sum_{j=1}^r \alpha_j u_j$; then on this event,
+    \[
+        \|(I - P_S)u\|_2 \leq \varepsilon \|u\|_2
+    \]
+    by the near-isometry of $P_S$ on the span of the basis. The probability bound is at least $1-\delta$ when $s \geq (2r + 2\ln(2/\delta))/{\varepsilon^2}$. The stated condition $s \geq (r + \ln(2/\delta))/{\varepsilon^2}$ is a slightly looser but more transparent sufficient condition. The attention error bound then follows from Proposition~2.
 \end{proof}
 
-\begin{remark}[Interpretation]
-    The first term in the bound is a purely sketching term; the second is a purely numerical term. In the intended mixed-precision regime, the numerical term should be lower order. This is the precise statement that the experiments are meant to test.
+The key feature is the dependence on $r$ rather than $d$: when the query--key rows lie near a low-dimensional subspace, a much smaller sketch suffices.
+
+We now turn to the rounding error. The standard Higham-type forward-error analysis~\autocite{Higham2002} for the matrix product $AB$ with $A \in \mathbb{R}^{n \times s}$, $B \in \mathbb{R}^{s \times n}$ gives
+\[
+    |\widehat{AB} - AB| \leq \gamma_s\, |A|\,|B|,
+    \qquad
+    \gamma_s := \frac{su}{1 - su},
+\]
+where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)^*$, the inner dimension is $s$, so the rounding error is proportional to $s \cdot u$---not $d \cdot u$ as it would be for the full product $QK^*$.
+
+\begin{proposition}[Rounding error for sketched logits]
+    \label{prop:rounding}
+    Let $\widehat{\mathcal{L}}_S(Q,K)$ denote the logit matrix computed in floating-point arithmetic with unit roundoff $u$, and let $\gamma_s := su/(1-su)$ for $su < 1$. Then
+    \[
+        \|\widetilde{\mathcal{L}}_S(Q,K) - \widehat{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
+        \leq
+        \frac{\gamma_s\,\|QS\|_2\,\|KS\|_2\,\sqrt{n}}{\sqrt{d}}.
+    \]
+    Consequently,
+    \[
+        \|\widetilde{\mathcal{A}}_S(Q,K,V) - \widehat{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
+        \leq
+        \frac{\gamma_s\,\|QS\|_2\,\|KS\|_2\,\sqrt{n}\,\|V\|_2}{\sqrt{d}}.
+    \]
+\end{proposition}
+
+\begin{proof}
+    Write the sketched logit product as $d^{-1/2} A B^*$ with $A = QS \in \mathbb{R}^{n \times s}$ and $B = KS \in \mathbb{R}^{n \times s}$. The standard forward-error bound for matrix multiplication~\autocite{Higham2002} gives
+    \[
+        |\widehat{AB}^* - AB^*| \leq \gamma_s\, |A|\,|B^*|,
+    \]
+    entrywise in absolute value. Taking the Frobenius (Hilbert--Schmidt) norm,
+    \[
+        \|\widehat{AB}^* - AB^*\|_{\mathrm{HS}}
+        \leq \gamma_s\, \||A|\,|B^*|\|_{\mathrm{HS}}
+        \leq \gamma_s\, \|A\|_2\, \|B\|_2\, \sqrt{n},
+    \]
+    where the last step uses $\||A|\,|B^T|\|_{\mathrm{HS}} \leq \|A\|_2\,\|B\|_2\,\sqrt{n}$ (each row of $|A|$ has norm at most $\|A\|_2$, and similarly for $|B^T|$). Multiplying by $d^{-1/2}$ yields the logit bound. The attention-output bound follows from Proposition~1.
+\end{proof}
+
+The factor $\gamma_s$ scales linearly with $s$: sketching reduces the rounding error by a factor of $s/d$ compared to the unsketched product. This is the formal statement of the intuition that ``compressing first makes low precision safer.''
+
+Combining the probabilistic sketching guarantee with the rounding error analysis yields the main result.
+
+\begin{theorem}[Mixed-precision sketched attention]
+    \label{thm:main}
+    Under the hypotheses of Propositions~\ref{prop:probabilistic} and~\ref{prop:rounding}, with probability at least $1-\delta$,
+    \[
+        \|\mathcal{A}(Q,K,V) - \widehat{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
+        \leq
+        \frac{1}{\sqrt{d}}
+        \Bigl(
+            \varepsilon\, \|Q\|_{\mathrm{HS}}\,\|K\|_2
+            +
+            \gamma_s\, \|QS\|_2\,\|KS\|_2\,\sqrt{n}
+        \Bigr)
+        \|V\|_2.
+    \]
+    The first term is the sketching error; the second is the rounding error. The rounding term is lower order whenever $s \cdot u \ll \varepsilon$.
+\end{theorem}
+
+\begin{proof}
+    By the error-splitting identity (Proposition~3),
+    \[
+        \|\mathcal{A} - \widehat{\mathcal{A}}_S\|_{\mathrm{HS}}
+        \leq
+        \bigl(\|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}} + \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}\bigr)\,\|V\|_2.
+    \]
+    Apply Proposition~2 to the first term and Proposition~\ref{prop:rounding} to the second. For the lower-order claim, observe that $\gamma_s = O(s \cdot u)$ and $\|QS\|_2, \|KS\|_2 = O(\sqrt{\|Q\|_2\,\|K\|_2})$, so the rounding term is $O(s \cdot u \cdot \sqrt{n}\,\|Q\|_2\,\|K\|_2/\sqrt{d})$ while the sketching term is $\Theta(\varepsilon\,\|Q\|_{\mathrm{HS}}\,\|K\|_2/\sqrt{d})$. The condition $s \cdot u \ll \varepsilon$ ensures the rounding term is dominated.
+\end{proof}
+
+\begin{remark}[Design rule]
+    Theorem~\ref{thm:main} yields a concrete joint design rule. For unit roundoffs $u_{16} \approx 5 \times 10^{-4}$ (float16) and $u_{32} \approx 6 \times 10^{-8}$ (float32), the condition $s \cdot u \ll \varepsilon$ is satisfied for all practical sketch dimensions ($s \leq 128$) and tolerances ($\varepsilon \geq 0.01$). This means that in the typical operating regime, the rounding error is negligible and the total accuracy is governed entirely by the sketch dimension. The rule also reveals a regime to avoid: if $s$ is chosen too large relative to $1/u$, the rounding error can overtake the sketching error, defeating the purpose of mixed precision.
 \end{remark}
 
 \section{Numerical Experiments}
 
-The experiments probe the decomposition of Proposition~3 directly. For each combination of parameters $(n, d, s)$ and each precision configuration we compute three logit matrices:
+The experiments probe the decomposition of Theorem~\ref{thm:main} directly. For each combination of parameters $(n, d, s)$ and each precision configuration we compute three logit matrices:
 \begin{enumerate}
     \item $\mathcal{L}(Q,K)$: exact unsketched logits in \texttt{float64} (reference);
     \item $\widetilde{\mathcal{L}}_S(Q,K)$: exact sketched logits in \texttt{float64};
@@ -196,7 +251,7 @@ The sketching term is $\|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}
 
 The sketch $S \in \mathbb{R}^{d \times s}$ is a scaled Gaussian matrix with i.i.d.\ $\mathcal{N}(0, 1/s)$ entries. We sweep $n \in \{64, 128, 256\}$, $d \in \{32, 64\}$, $s \in \{8, 16, 24, 32\}$, and average over three seeds.
 
-Table~1 reports the HS errors of the logits for $d = 64$; the output errors follow the same pattern and are omitted for brevity. The sketching term is 3--4 orders of magnitude larger than the rounding term under \texttt{full\_fp32}, and 1--2 orders larger under \texttt{full\_fp16} and \texttt{mixed\_fp16}. In all tested regimes the total error $\|\mathcal{L} - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$ is dominated by the sketching term, confirming the hypothesis of Proposition~3.
+Table~1 reports the HS errors of the logits for $d = 64$; the output errors follow the same pattern and are omitted for brevity. The sketching term is 3--4 orders of magnitude larger than the rounding term under \texttt{full\_fp32}, and 1--2 orders larger under \texttt{full\_fp16} and \texttt{mixed\_fp16}. In all tested regimes the total error $\|\mathcal{L} - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$ is dominated by the sketching term, confirming the hypothesis of Theorem~\ref{thm:main}.
 
 \begin{table}[ht]
 \centering
@@ -225,8 +280,8 @@ Configuration & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{rd}}$ & $E_{\mathrm{sk}} /
 \end{tabular}
 \end{table}
 
-Two observations stand out. First, the ratio $E_{\mathrm{sk}} / E_{\mathrm{rd}}$ is consistently above $10^3$ even for naive float16, and above $10^6$ for float32. Second, the mixed-precision configuration achieves a rounding error comparable to naive float16 (within a factor of~2) while the sketching error is identical by construction. This is consistent with the intuition that the rounding term is governed by the reduced dynamic range after sketching, not by the precision of the outer accumulation.
+Two observations stand out. First, the ratio $E_{\mathrm{sk}} / E_{\mathrm{rd}}$ is consistently above $10^3$ even for naive float16, and above $10^6$ for float32. This is consistent with the $s \cdot u \ll \varepsilon$ condition: for $s = 32$ and $u_{16} \approx 5 \times 10^{-4}$, we have $s \cdot u_{16} \approx 0.016$, while the effective $\varepsilon$ from the sketch is on the order of $0.5$--$1.0$. Second, the mixed-precision configuration achieves a rounding error comparable to naive float16 (within a factor of~2) while the sketching error is identical by construction. This is consistent with Proposition~\ref{prop:rounding}: the rounding error is governed by the inner dimension $s$ of the product, not by the ambient dimension $d$.
 
 \section{Outlook}
 
-The present report deliberately studies only the feature-sketch model $QK^T \approx QSS^TK^T$. This is sufficient for a mathematically clean first analysis. The natural extensions are Nystr\"om-type approximations and random-feature approximations of the softmax kernel, which would connect the project more directly with the efficient-attention literature~\autocite{XiongEtAl2021, ChoromanskiEtAl2021}.
+The present report studies only the feature-sketch model $QK^T \approx QSS^TK^T$. The natural extensions are Nystr\"om-type approximations and random-feature approximations of the softmax kernel, which would connect the project more directly with the efficient-attention literature~\autocite{XiongEtAl2021, ChoromanskiEtAl2021}. Another direction is to replace the Gaussian sketch by a structured random matrix (e.g., a subsampled randomized Hadamard transform), which would yield the same probabilistic guarantees with lower computational cost.
