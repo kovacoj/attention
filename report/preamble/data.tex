@@ -27,7 +27,7 @@
 
 %% Abstract
 \newcommand*{\Abstract}{%
-    This report studies the interaction between randomized sketching and mixed-precision arithmetic in scaled dot-product attention. The central approximation replaces the exact logit matrix $QK^T$ by a sketched surrogate of the form $QSS^TK^T$, where $S$ is a random projection. The goal is to compare sketching error and finite-precision error, and to determine when mixed precision remains reliable once randomized approximation is already present. The accompanying Python experiments measure logit error, attention-weight error, output error, and runtime across several sketch sizes and precision modes.
+    We propose a mathematically focused study of scaled dot-product attention under two simultaneous approximations: randomized feature sketching and mixed-precision arithmetic. The exact logit operator $d^{-1/2}QK^T$ is replaced by the sketched operator $d^{-1/2}QSS^TK^T$, where $S$ is a random sketching matrix of smaller column dimension. The report isolates three levels of perturbation: the deterministic error in the logits, the induced perturbation of the rowwise softmax map, and the additional finite-precision error introduced when the sketched computation is carried out in low precision. The main analytical result is a clean error decomposition showing that the total output error is controlled by the sum of a sketching term and a rounding term. The accompanying experiments are designed as a validation of this decomposition rather than as a large-scale engineering benchmark.
 }
 
 %% Subject (short description for PDF metadata)

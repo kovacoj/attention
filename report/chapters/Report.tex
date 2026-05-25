@@ -1,79 +1,208 @@
-\section{Introduction}
+\section{Proposal}
 
-Attention is a natural place to connect transformer models with randomized numerical linear algebra and finite-precision arithmetic. The central map is
-\[
-    A(Q,K,V) = \operatorname{softmax}\left(\frac{QK^T}{\sqrt{d}}\right)V,
-\]
-where the dominant cost comes from forming the logit matrix $QK^T$ and then applying the rowwise softmax. This makes attention a good test case for two approximation ideas that are already important in modern machine learning systems: randomized dimension reduction and reduced-precision arithmetic.
-
-This report focuses on a single attention block rather than full transformer training. That scope is small enough for a short paper, but still rich enough to support both a mathematical discussion and numerical experiments.
-
-\section{Mathematical Setup}
-
-Let $Q,K,V \in \mathbb{R}^{n \times d}$ and let $S \in \mathbb{R}^{d \times s}$ be a random sketching matrix with $s < d$. The main approximation studied here is
-\[
-    QK^T \approx QSS^TK^T,
-\]
-which leads to the sketched attention rule
-\[
-    \widetilde{A}(Q,K,V) = \operatorname{softmax}\left(\frac{QSS^TK^T}{\sqrt{d}}\right)V.
-\]
-
-The motivating idea is that the sketch compresses the feature dimension before the expensive matrix product is formed. The report will treat the resulting error as a combination of two effects:
+The purpose of this report is to study one analytically transparent fragment of the transformer architecture~\autocite{Vaswani2017}: scaled dot-product attention. The report is intentionally not about full transformer training. Instead, it isolates a single nonlinear operator and examines how two approximations interact:
 \begin{enumerate}
-    \item approximation error introduced by sketching,
-    \item rounding error introduced by finite-precision arithmetic.
+    \item a randomized finite-rank compression motivated by randomized numerical linear algebra~\autocite{HalkoMartinssonTropp2011, Mahoney2016};
+    \item a mixed-precision realization motivated by modern low-precision training practice~\autocite{MicikeviciusEtAl2018}.
 \end{enumerate}
 
-\section{Precision Models}
+This focus keeps the project aligned with the mathematical language of the lecture notes: dimension reduction, kernel-style matrix constructions, and operator perturbation. It also places the work in the neighborhood of efficient-attention models such as Linformer, Nystr\"omformer, and Performer~\autocite{WangEtAl2020, XiongEtAl2021, ChoromanskiEtAl2021}, while remaining much narrower in scope.
 
-The numerical experiments compare the following computation modes:
-\begin{itemize}
-    \item full \texttt{float64} reference,
-    \item full \texttt{float32},
-    \item naive \texttt{float16},
-    \item mixed precision with \texttt{float16} storage and \texttt{float32} accumulation,
-    \item sketched variants of the same precision modes.
-\end{itemize}
+The guiding question is the following.
 
-This separation is useful because naive low precision and mixed precision often behave very differently once softmax is involved.
+\begin{idea}[Research question]
+    When the attention logits are first compressed by a randomized sketch, can the subsequent computation be carried out in mixed precision with only a lower-order loss of accuracy?
+\end{idea}
 
-\section{Experimental Design}
+The intended contribution of the report is modest but precise: a deterministic error decomposition, together with numerical experiments that test whether the finite-precision term is indeed subordinate to the sketching term in relevant parameter regimes.
 
-The current Python code runs sweeps over:
-\begin{itemize}
-    \item sequence length $n$,
-    \item feature dimension $d$,
-    \item sketch dimension $s$,
-    \item precision mode,
-    \item random seed.
-\end{itemize}
+\section{Operator-Theoretic Setup}
 
-For each run, the code reports:
-\begin{itemize}
-    \item relative Frobenius error of the attention logits,
-    \item mean rowwise $\ell_1$ error of the attention weights,
-    \item relative Frobenius error of the attention output,
-    \item runtime.
-\end{itemize}
+Let $\mathcal{H}_d := \mathbb{R}^d$ and $\mathcal{H}_n := \mathbb{R}^n$, both endowed with their standard Euclidean inner products. We identify matrices in $\mathbb{R}^{n \times d}$ with Hilbert--Schmidt operators
+\[
+    Q,K,V : \mathcal{H}_d \to \mathcal{H}_n.
+\]
+Their Hilbert--Schmidt norm is denoted by $\|\cdot\|_{\mathrm{HS}}$, while $\|\cdot\|_2$ denotes the spectral norm on linear operators.
 
-The main empirical question is whether, for a moderate sketch size, the sketching error already dominates the total error so strongly that mixed precision adds only a small extra loss while still giving a practical computational advantage.
+The exact logit operator is
+\[
+    \mathcal{L}(Q,K) := d^{-1/2} QK^* \in \mathcal{L}(\mathcal{H}_n),
+\]
+and the rowwise softmax map is denoted by
+\[
+    \Sigma : \mathbb{R}^{n \times n} \to \mathbb{R}^{n \times n}.
+\]
+Accordingly, the attention output is the nonlinear operator
+\[
+    \mathcal{A}(Q,K,V) := \Sigma\!\bigl(\mathcal{L}(Q,K)\bigr)V.
+\]
 
-\section{Results Plan}
+Now let $S \in \mathbb{R}^{d \times s}$ with $s < d$. The associated rank-$s$ positive semidefinite operator on $\mathcal{H}_d$ is
+\[
+    P_S := SS^*.
+\]
+The sketched logit operator is then
+\[
+    \widetilde{\mathcal{L}}_S(Q,K) := d^{-1/2} QP_S K^*,
+\]
+and the corresponding sketched attention output is
+\[
+    \widetilde{\mathcal{A}}_S(Q,K,V) := \Sigma\!\bigl(\widetilde{\mathcal{L}}_S(Q,K)\bigr)V.
+\]
 
-The report will develop the numerical section around three comparisons:
+Thus the basic approximation step is the replacement of the identity on $\mathcal{H}_d$ by the finite-rank operator $P_S$.
+
+\section{Analytical Core}
+
+The analysis begins with a stability property of the rowwise softmax map.
+
+\begin{proposition}[Rowwise softmax is Hilbert--Schmidt Lipschitz]
+    Let $L,M \in \mathbb{R}^{n \times n}$. Then
+    \[
+        \|\Sigma(L) - \Sigma(M)\|_{\mathrm{HS}} \leq \|L - M\|_{\mathrm{HS}}.
+    \]
+    Consequently, for every $V \in \mathbb{R}^{n \times d}$,
+    \[
+        \|\Sigma(L)V - \Sigma(M)V\|_{\mathrm{HS}} \leq \|L - M\|_{\mathrm{HS}}\,\|V\|_2.
+    \]
+\end{proposition}
+
+\begin{proof}
+    Let $\sigma : \mathbb{R}^n \to \mathbb{R}^n$ be the ordinary softmax map on vectors. Its Jacobian at $x \in \mathbb{R}^n$ is
+    \[
+        D\sigma(x) = \operatorname{Diag}(p) - pp^T,
+        \qquad
+        p := \sigma(x).
+    \]
+    For any $z \in \mathbb{R}^n$ one has
+    \[
+        z^T D\sigma(x) z
+        = \sum_{i=1}^n p_i z_i^2 - \Bigl(\sum_{i=1}^n p_i z_i\Bigr)^2
+        \leq \sum_{i=1}^n p_i z_i^2
+        \leq \|z\|_2^2.
+    \]
+    Hence $\|D\sigma(x)\|_2 \leq 1$ for all $x$, and the mean value theorem yields
+    \[
+        \|\sigma(x)-\sigma(y)\|_2 \leq \|x-y\|_2.
+    \]
+    Applying this estimate row by row gives
+    \[
+        \|\Sigma(L)-\Sigma(M)\|_{\mathrm{HS}}^2
+        = \sum_{i=1}^n \|\sigma(\ell_i)-\sigma(m_i)\|_2^2
+        \leq \sum_{i=1}^n \|\ell_i-m_i\|_2^2
+        = \|L-M\|_{\mathrm{HS}}^2,
+    \]
+    where $\ell_i$ and $m_i$ are the rows of $L$ and $M$. The second assertion follows from the submultiplicativity estimate
+    \[
+        \|XV\|_{\mathrm{HS}} \leq \|X\|_{\mathrm{HS}}\|V\|_2.
+    \]
+\end{proof}
+
+The next proposition isolates the deterministic sketching error.
+
+\begin{proposition}[Deterministic sketching bound]
+    Let $U \subseteq \mathcal{H}_d$ be a subspace containing all row vectors of $Q$ and $K$. Assume that $P_S$ is an $\varepsilon$-approximate identity on $U$, in the sense that
+    \[
+        \|(I-P_S)u\|_2 \leq \varepsilon \|u\|_2
+        \qquad
+        \text{for all } u \in U.
+    \]
+    Then
+    \[
+        \|\mathcal{L}(Q,K)-\widetilde{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
+        \leq
+        \frac{\varepsilon}{\sqrt d}\,\|Q\|_{\mathrm{HS}}\,\|K\|_2.
+    \]
+    Consequently,
+    \[
+        \|\mathcal{A}(Q,K,V)-\widetilde{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
+        \leq
+        \frac{\varepsilon}{\sqrt d}\,\|Q\|_{\mathrm{HS}}\,\|K\|_2\,\|V\|_2.
+    \]
+\end{proposition}
+
+\begin{proof}
+    Since
+    \[
+        \mathcal{L}(Q,K)-\widetilde{\mathcal{L}}_S(Q,K)
+        = d^{-1/2} Q(I-P_S)K^*,
+    \]
+    we obtain
+    \[
+        \|\mathcal{L}(Q,K)-\widetilde{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
+        \leq
+        \frac{1}{\sqrt d}\,\|Q(I-P_S)\|_{\mathrm{HS}}\,\|K^*\|_2.
+    \]
+    Every row of $Q$ lies in $U$, so the approximate-identity assumption implies
+    \[
+        \|Q(I-P_S)\|_{\mathrm{HS}} \leq \varepsilon \|Q\|_{\mathrm{HS}}.
+    \]
+    Using $\|K^*\|_2 = \|K\|_2$ proves the first estimate. The second follows from the previous proposition.
+\end{proof}
+
+This reduces the sketching analysis to a single geometric requirement on the projector $P_S$. In the randomized setting, the role of randNLA is to choose $S$ so that this requirement holds with high probability on a subspace that captures the geometry of the rows of $Q$ and $K$.
+
+The final step is to separate sketching error from finite-precision error.
+
+\begin{proposition}[Error splitting for mixed-precision attention]
+    Let $\widehat{\mathcal{L}}_S(Q,K)$ denote the logit matrix produced by a finite-precision implementation of the sketched computation, and define
+    \[
+        \widehat{\mathcal{A}}_S(Q,K,V)
+        := \Sigma\!\bigl(\widehat{\mathcal{L}}_S(Q,K)\bigr)V.
+    \]
+    Then
+    \[
+        \|\mathcal{A}(Q,K,V)-\widehat{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
+        \leq
+        \Bigl(
+            \|\mathcal{L}(Q,K)-\widetilde{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
+            +
+            \|\widetilde{\mathcal{L}}_S(Q,K)-\widehat{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
+        \Bigr)
+        \|V\|_2.
+    \]
+\end{proposition}
+
+\begin{proof}
+    Apply the previous Lipschitz estimate with
+    \[
+        L = \mathcal{L}(Q,K),
+        \qquad
+        M = \widehat{\mathcal{L}}_S(Q,K),
+    \]
+    and then use the triangle inequality
+    \[
+        \|L-M\|_{\mathrm{HS}}
+        \leq
+        \|L-\widetilde{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
+        +
+        \|\widetilde{\mathcal{L}}_S(Q,K)-M\|_{\mathrm{HS}}.
+    \]
+\end{proof}
+
+\begin{remark}[Interpretation]
+    The first term in the bound is a purely sketching term; the second is a purely numerical term. In the intended mixed-precision regime, the numerical term should be lower order. This is the precise statement that the experiments are meant to test.
+\end{remark}
+
+\section{Proposed Experiments}
+
+The numerical part of the project is not meant to be a large benchmark. Its role is to probe the analytical decomposition above. Accordingly, the experiments should compare three levels of computation:
 \begin{enumerate}
-    \item full attention versus sketched attention,
-    \item \texttt{float32} versus naive \texttt{float16},
-    \item naive low precision versus mixed precision with higher-precision accumulation.
+    \item exact unsketched attention in \texttt{float64};
+    \item exact sketched attention in \texttt{float64};
+    \item sketched attention in \texttt{float16} and mixed precision.
 \end{enumerate}
 
-This should be enough to support a short but coherent conclusion about when randomized sketching and mixed precision interact favorably.
+For each configuration we measure:
+\begin{itemize}
+    \item the Hilbert--Schmidt error of the logits,
+    \item the rowwise simplex error after softmax,
+    \item the Hilbert--Schmidt error of the final attention output,
+    \item the runtime.
+\end{itemize}
 
-\section{Discussion}
+The theoretical narrative suggests the following validation strategy. First, compare the exact unsketched and exact sketched logits; this isolates the sketching term. Second, compare the exact sketched and low-precision sketched logits; this isolates the numerical term. Finally, compare the resulting attention outputs. The main hypothesis is that once the sketch dimension $s$ is moderate, the rounding term will be substantially smaller than the sketching term under mixed-precision accumulation, even if naive low precision is noticeably less stable.
 
-The project sits naturally between several themes of the lecture notes: dimension reduction, kernel-style matrix constructions, transformer attention, and computational approximations used in large-scale learning systems. Its main advantage as a term-paper topic is that it stays close to an analytically transparent formula while still touching a modern deep learning mechanism.
+\section{Outlook}
 
-\section{Conclusion}
-
-The working hypothesis is that randomized sketching can make mixed-precision attention more attractive, because once a controlled approximation is introduced at the linear algebra level, careful mixed precision may contribute only a secondary error term. The experiments in this repository are meant to test that claim directly.
+The present report deliberately studies only the feature-sketch model $QK^T \approx QSS^TK^T$. This is sufficient for a mathematically clean first analysis. If time permits, the natural extensions are Nystr\"om-type approximations and random-feature approximations of the softmax kernel, which would connect the project more directly with the efficient-attention literature.
