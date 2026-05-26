@@ -54,6 +54,25 @@ def read_results_csv(path: Path) -> list[dict]:
     return rows
 
 
+def _group_means(rows: list[dict], key_field: str, metric_fields: list[str]) -> dict[str, dict[str, float]]:
+    grouped: dict[str, dict[str, list[float]]] = {}
+    for row in rows:
+        key = row[key_field]
+        entry = grouped.setdefault(key, {metric: [] for metric in metric_fields})
+        for metric in metric_fields:
+            value = row.get(metric, "")
+            if value != "":
+                entry[metric].append(float(value))
+
+    means: dict[str, dict[str, float]] = {}
+    for key, metrics in grouped.items():
+        means[key] = {
+            metric: float(np.mean(values)) if values else float("nan")
+            for metric, values in metrics.items()
+        }
+    return means
+
+
 def plot_rf_error_vs_m(csv_path: Path, out_path: Path, styles_dir: Path | None = None, source_filter: str | None = None) -> None:
     """Plot random-feature rf and fp output errors vs feature dimension m.
 
@@ -112,17 +131,129 @@ def plot_rf_error_vs_m(csv_path: Path, out_path: Path, styles_dir: Path | None =
     fig.savefig(out_path, bbox_inches="tight", dpi=plt.rcParams.get("savefig.dpi"))
 
 
+def plot_precision_policy_map(
+    precision_csv: Path,
+    residual_csv: Path,
+    out_path: Path,
+    styles_dir: Path | None = None,
+) -> None:
+    if styles_dir is None:
+        styles_dir = Path(__file__).resolve().parents[1] / "styles"
+    _ensure_styles(styles_dir)
+
+    precision_rows = read_results_csv(precision_csv)
+    residual_rows = read_results_csv(residual_csv)
+    if not precision_rows or not residual_rows:
+        raise RuntimeError("Need non-empty precision and residual CSVs for plotting.")
+
+    precision_metrics = [
+        "rel_err_logits_hs",
+        "row_err_probs_l1_mean",
+        "rel_err_output_hs",
+        "softmax_amp_ratio",
+    ]
+    residual_metrics = ["rel_err_state_hs"]
+    precision_means = _group_means(precision_rows, "case", precision_metrics)
+    residual_means = _group_means(residual_rows, "case", residual_metrics)
+
+    policy_order = [
+        "fp32_reference",
+        "bf16_safe",
+        "fp16_safe",
+        "bf16_low_logit",
+        "fp16_low_logit",
+        "bf16_low_softmax",
+        "fp16_low_softmax",
+        "bf16_low_value",
+        "fp16_low_value",
+    ]
+    policy_labels = [
+        "fp32 ref",
+        "bf16 safe",
+        "fp16 safe",
+        "bf16 logits",
+        "fp16 logits",
+        "bf16 softmax",
+        "fp16 softmax",
+        "bf16 value",
+        "fp16 value",
+    ]
+    metric_labels = [r"$E_L$", r"$E_P$", r"$E_A$", r"$\rho_{\mathrm{softmax}}$", r"$E_{\mathrm{depth}}$"]
+
+    def rows_for_source(source: str) -> np.ndarray:
+        matrix = np.full((len(policy_order), len(metric_labels)), np.nan, dtype=float)
+        for i, policy in enumerate(policy_order):
+            rvals = [float(row["rel_err_state_hs"]) for row in residual_rows if row["case"] == policy and row.get("data_source") == source]
+            for j, metric in enumerate(precision_metrics):
+                vals = [float(row[metric]) for row in precision_rows if row["case"] == policy and row.get("data_source") == source]
+                if vals:
+                    matrix[i, j] = float(np.mean(vals))
+            if rvals:
+                matrix[i, 4] = float(np.mean(rvals))
+        return matrix
+
+    sources = []
+    for source in ["gaussian", "transformer"]:
+        if any(row.get("data_source") == source for row in precision_rows) and any(
+            row.get("data_source") == source for row in residual_rows
+        ):
+            sources.append(source)
+    if not sources:
+        raise RuntimeError("No overlapping data sources found between precision and residual CSVs.")
+
+    fig, axes = plt.subplots(1, len(sources), figsize=(5.3 * len(sources), 4.5), dpi=plt.rcParams.get("figure.dpi"))
+    if len(sources) == 1:
+        axes = [axes]
+
+    for ax, source in zip(axes, sources):
+        raw = rows_for_source(source)
+        safe = np.where(raw > 0.0, raw, np.nan)
+        display = np.log10(safe)
+        im = ax.imshow(display, aspect="auto", cmap="viridis")
+        ax.set_xticks(range(len(metric_labels)), metric_labels)
+        ax.set_yticks(range(len(policy_labels)), policy_labels)
+        ax.set_title(source.title())
+        for i in range(display.shape[0]):
+            for j in range(display.shape[1]):
+                value = raw[i, j]
+                if np.isnan(value):
+                    text = "-"
+                else:
+                    text = f"{value:.1e}" if value < 100 else f"{value:.1e}"
+                ax.text(j, i, text, ha="center", va="center", color="white", fontsize=7)
+
+    cbar = fig.colorbar(im, ax=axes, shrink=0.9)
+    cbar.set_label(r"$\log_{10}$ metric")
+    fig.suptitle("Precision-placement map")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, bbox_inches="tight", dpi=plt.rcParams.get("savefig.dpi"))
+
+
 def _main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     if len(argv) < 2:
         print("Usage: python -m src.plotting <input.csv> <output.pdf> [styles_dir] [source]")
         return 2
-    csv_path = Path(argv[0])
-    out_path = Path(argv[1])
-    styles_dir = Path(argv[2]) if len(argv) >= 3 else None
-    source_filter = argv[3] if len(argv) >= 4 else None
-    plot_rf_error_vs_m(csv_path, out_path, styles_dir, source_filter)
+    command = argv[0]
+    if command == "plot_rf_error_vs_m":
+        csv_path = Path(argv[1])
+        out_path = Path(argv[2])
+        styles_dir = Path(argv[3]) if len(argv) >= 4 else None
+        source_filter = argv[4] if len(argv) >= 5 else None
+        plot_rf_error_vs_m(csv_path, out_path, styles_dir, source_filter)
+    elif command == "plot_precision_policy_map":
+        precision_csv = Path(argv[1])
+        residual_csv = Path(argv[2])
+        out_path = Path(argv[3])
+        styles_dir = Path(argv[4]) if len(argv) >= 5 else None
+        plot_precision_policy_map(precision_csv, residual_csv, out_path, styles_dir)
+    else:
+        csv_path = Path(argv[0])
+        out_path = Path(argv[1])
+        styles_dir = Path(argv[2]) if len(argv) >= 3 else None
+        source_filter = argv[3] if len(argv) >= 4 else None
+        plot_rf_error_vs_m(csv_path, out_path, styles_dir, source_filter)
     print(f"Wrote plot to {out_path}")
     return 0
 

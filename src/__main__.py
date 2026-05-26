@@ -74,6 +74,7 @@ def main() -> None:
     parser.add_argument("--transformer-head", type=int, default=0)
     parser.add_argument("--seeds", default="0,1,2")
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--backend", choices=("torch", "jax"), default="torch")
     parser.add_argument(
         "--output",
         default=None,
@@ -128,7 +129,19 @@ def main() -> None:
             print(f"Plot generation skipped or failed: {exc}")
         return
 
+    source_config = ActivationSourceConfig(
+        source=args.data_source,
+        intrinsic_rank=args.intrinsic_rank,
+        noise_std=args.noise_std,
+        transformer_model=args.transformer_model,
+        transformer_text=args.transformer_text,
+        transformer_layer=args.transformer_layer,
+        transformer_head=args.transformer_head,
+    )
+
     if args.experiment == "sketch":
+        if args.backend != "torch":
+            raise ValueError("The sketch baseline currently supports only --backend torch.")
         results = run_sketch_sweep(
             _parse_int_list(args.sequence_lengths),
             _parse_int_list(args.d_models),
@@ -150,8 +163,10 @@ def main() -> None:
             _parse_int_list(args.depths),
             _parse_int_list(args.seeds),
             device=device,
+            source_config=source_config,
             residual_scale=args.residual_scale,
             terminal_time=args.terminal_time,
+            backend=args.backend,
         )
         summary = summarize_residual_results(results)
         write_residual_results(results, Path(output))
@@ -165,6 +180,8 @@ def main() -> None:
         _parse_int_list(args.d_models),
         _parse_int_list(args.seeds),
         device=device,
+        source_config=source_config,
+        backend=args.backend,
     )
     summary = summarize_results(results)
 
