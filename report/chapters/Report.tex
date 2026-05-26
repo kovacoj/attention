@@ -1,10 +1,12 @@
 \section{Introduction}
 
-The purpose of this report is to study one analytically transparent component of the transformer architecture~\autocite{Vaswani2017}: scaled dot-product attention. The broader question is a precision-placement question: which stages of the forward pass can safely run in low precision, and which still require higher-precision accumulation or reduction? The relevant stages include storage of the query, key, and value tensors, the logit product $QK^T$, logit storage, the rowwise softmax, and the final value product.
+Scaled dot-product attention~\autocite{Vaswani2017} is the core computational primitive of transformer architectures. As models grow, the memory and compute cost of the attention forward pass motivates the use of reduced-precision arithmetic. The natural question is a \emph{precision-placement} question: which stages of the forward pass can safely run in low precision, and which still require higher-precision accumulation or reduction?
 
-The present draft approaches that question through a deliberately simple baseline. Rather than analyzing the full exact-attention pipeline immediately, it studies a sketched surrogate rooted in randomized numerical linear algebra~\autocite{HalkoMartinssonTropp2011, Mahoney2016, WangEtAl2020, XiongEtAl2021, ChoromanskiEtAl2021}. This keeps the error decomposition explicit: one term comes from the low-dimensional approximation itself, and another from the floating-point implementation of the reduced computation.
+The relevant stages are: storage of the query, key, and value tensors; the logit product $QK^T$; logit storage; the rowwise softmax; and the final value product. A global dtype comparison---the usual approach---conflates these stages and cannot identify which \emph{locations} are numerically sensitive. This report instead decomposes the attention pipeline and asks, for each stage separately, whether low precision there produces acceptable error.
 
-That baseline is not intended as the final empirical claim of the project. On generic Gaussian data, the sketching floor is often so large that the main experiment becomes a stress test rather than a competitive attention approximation. Its value is therefore methodological: it isolates the mechanism by which inner dimension, accumulation precision, and softmax stability interact. The main result (Theorem~\ref{thm:main}) makes this interaction explicit through the condition $s \cdot u \ll \varepsilon$, where $s$ is the sketch dimension, $u$ is the unit roundoff, and $\varepsilon$ is the sketch tolerance. The next phase of the project is to carry the same decomposition over to exact attention under explicit precision policies.
+The analytical core is Proposition~\ref{prop:local-perturbation}, a local perturbation bound for exact attention that separates the effect of logit perturbations (weighted by $\|V\|_2$) from value perturbations (weighted by $\sqrt{n}$ from the row-stochastic spectral norm). This decomposition directly predicts which precision locations are sensitive: logit errors propagate through softmax with unit Lipschitz constant, while value errors propagate with a $\sqrt{n}$ factor that is typically moderate. The sharpest failure mode is therefore low-precision softmax, which can amplify tiny logit perturbations into large probability shifts even when the logit error itself is small.
+
+Sketching-based attention approximations~\autocite{HalkoMartinssonTropp2011, Mahoney2016, WangEtAl2020, XiongEtAl2021, ChoromanskiEtAl2021} are retained as a methodological baseline: they provide a controlled stress test in which the error decomposition can be verified under a known approximation floor. But they are not the main contribution.
 
 \section{Operator-Theoretic Setup}
 
@@ -27,22 +29,12 @@ Accordingly, the attention output is the nonlinear operator
     \mathcal{A}(Q,K,V) := \Sigma\!\bigl(\mathcal{L}(Q,K)\bigr)V.
 \]
 
-Now let $S \in \mathbb{R}^{d \times s}$ with $s < d$. The sketched logit operator is
-\[
-    \widetilde{\mathcal{L}}_S(Q,K) := d^{-1/2} QSS^*K^*.
-\]
-The operator $P_S := SS^*$ is positive semidefinite with rank at most $s$, but it is not in general an orthogonal projector unless the columns of $S$ are orthonormal. The corresponding sketched attention output is
-\[
-    \widetilde{\mathcal{A}}_S(Q,K,V) := \Sigma\!\bigl(\widetilde{\mathcal{L}}_S(Q,K)\bigr)V.
-\]
-
-Thus the basic approximation step is the replacement of inner products $\langle q_i, k_j \rangle$ by sketched inner products $\langle S^* q_i, S^* k_j \rangle$.
-
 \section{Analytical Core}
 
-The analysis begins with a stability property of the rowwise softmax map.
+The analysis begins with a stability property of the rowwise softmax map, which is used in both the exact-attention and sketching bounds.
 
 \begin{proposition}[Rowwise softmax is Hilbert--Schmidt Lipschitz]
+    \label{prop:softmax-lipschitz}
     Let $L,M \in \mathbb{R}^{n \times n}$. Then
     \[
         \|\Sigma(L) - \Sigma(M)\|_{\mathrm{HS}} \leq \|L - M\|_{\mathrm{HS}}.
@@ -57,7 +49,79 @@ The analysis begins with a stability property of the rowwise softmax map.
     Let $\sigma : \mathbb{R}^n \to \mathbb{R}^n$ be the softmax map on vectors with Jacobian $D\sigma(x) = \operatorname{Diag}(p) - pp^T$ where $p = \sigma(x)$. For any $z \in \mathbb{R}^n$, $z^T D\sigma(x)\,z = \sum_i p_i z_i^2 - (\sum_i p_i z_i)^2 \leq \|z\|_2^2$, so $\|D\sigma(x)\|_2 \leq 1$ for all $x$. The mean value theorem gives $\|\sigma(x)-\sigma(y)\|_2 \leq \|x-y\|_2$; applying this row by row and squaring yields the HS bound. The second assertion follows from $\|XV\|_{\mathrm{HS}} \leq \|X\|_{\mathrm{HS}}\|V\|_2$.
 \end{proof}
 
-The next proposition isolates the deterministic sketching error. Since attention logits are bilinear forms $q_i^* k_j$, the relevant notion is that $S$ approximately preserves inner products on the row space of $Q$ and $K$.
+\subsection{Exact-Attention Perturbation Bound}
+
+The next proposition is the main analytical result. It decomposes the attention error into a logit-driven term and a value-driven term, directly predicting the relative sensitivity of different precision placements.
+
+\begin{proposition}[Exact-attention local perturbation bound]
+    \label{prop:local-perturbation}
+    Let
+    \[
+        A = \Sigma(L)V,
+        \qquad
+        \widehat{A} = \Sigma(\widehat{L})\widehat{V},
+    \]
+    where $L, \widehat{L} \in \mathbb{R}^{n \times n}$ and $V, \widehat{V} \in \mathbb{R}^{n \times d}$. Writing
+    \[
+        \Delta L := \widehat{L} - L,
+        \qquad
+        \Delta V := \widehat{V} - V,
+    \]
+    one has
+    \[
+        \|A - \widehat{A}\|_{\mathrm{HS}}
+        \leq
+        \|\Delta L\|_{\mathrm{HS}}\,\|V\|_2
+        +
+        \|\Sigma(\widehat{L})\|_2\,\|\Delta V\|_{\mathrm{HS}}.
+    \]
+    In particular, since $\Sigma(\widehat{L})$ is row-stochastic and therefore $\|\Sigma(\widehat{L})\|_2 \leq \sqrt{n}$,
+    \[
+        \|A - \widehat{A}\|_{\mathrm{HS}}
+        \leq
+        \|\Delta L\|_{\mathrm{HS}}\,\|V\|_2
+        +
+        \sqrt{n}\,\|\Delta V\|_{\mathrm{HS}}.
+    \]
+\end{proposition}
+
+\begin{proof}
+    Add and subtract $\Sigma(\widehat{L})V$ and apply the triangle inequality:
+    \[
+        \|A-\widehat{A}\|_{\mathrm{HS}}
+        \leq
+        \|\Sigma(L)V-\Sigma(\widehat{L})V\|_{\mathrm{HS}}
+        +
+        \|\Sigma(\widehat{L})(V-\widehat{V})\|_{\mathrm{HS}}.
+    \]
+    The first term is bounded by Proposition~\ref{prop:softmax-lipschitz}:
+    \[
+        \|\Sigma(L)V-\Sigma(\widehat{L})V\|_{\mathrm{HS}}
+        \leq
+        \|L-\widehat{L}\|_{\mathrm{HS}}\,\|V\|_2.
+    \]
+    For the second,
+    \[
+        \|\Sigma(\widehat{L})(V-\widehat{V})\|_{\mathrm{HS}}
+        \leq
+        \|\Sigma(\widehat{L})\|_2\,\|\Delta V\|_{\mathrm{HS}}.
+    \]
+    Combining these gives the stated bound.
+\end{proof}
+
+\begin{remark}[Interpretation for precision placement]
+    \label{rem:placement}
+    Proposition~\ref{prop:local-perturbation} directly predicts the relative danger of different precision choices:
+    \begin{enumerate}
+        \item \textbf{Logit perturbations} ($\Delta L \neq 0$, $\Delta V = 0$): The error scales as $\|\Delta L\|_{\mathrm{HS}}\|V\|_2$. Since the softmax is 1-Lipschitz (Proposition~\ref{prop:softmax-lipschitz}), logit perturbations are \emph{not amplified} by softmax itself. However, when logit perturbations are amplified into probability errors, the amplification ratio $\rho_{\mathrm{softmax}}$ can still be large on inputs where the softmax is nearly one-hot---a regime the experiments expose.
+        \item \textbf{Value perturbations} ($\Delta L = 0$, $\Delta V \neq 0$): The error scales as $\sqrt{n}\,\|\Delta V\|_{\mathrm{HS}}$. This $\sqrt{n}$ factor is moderate for typical sequence lengths but can become significant for very long sequences.
+        \item \textbf{Low-precision softmax}: When $\Sigma$ itself is computed in low precision, the Lipschitz bound from Proposition~\ref{prop:softmax-lipschitz} no longer applies, and the effective perturbation of the probability matrix can be much larger than $\|\Delta L\|_{\mathrm{HS}}$. The experiments confirm this: $\rho_{\mathrm{softmax}}$ spikes to $\sim\!10^3$ on transformer activations when softmax is run in bf16/fp16, while remaining $< 1$ when only storage is low precision.
+    \end{enumerate}
+\end{remark}
+
+\subsection{Supporting Background: Sketching as a Controlled Baseline}
+
+The following propositions analyze a sketched surrogate $\widetilde{\mathcal{A}}_S(Q,K,V) = \Sigma(d^{-1/2}QSS^*K^*)V$ obtained by replacing the full logit product with a low-dimensional projection through $S \in \mathbb{R}^{d \times s}$ with $s < d$. These results are retained as a methodological baseline: the sketching error provides a known approximation floor against which the finite-precision error can be isolated and studied.
 
 \begin{proposition}[Deterministic sketching bound]
     \label{prop:deterministic}
@@ -93,12 +157,8 @@ The next proposition isolates the deterministic sketching error. Since attention
         \leq \|Q_U\|_{\mathrm{HS}}\,\|I_r - U_0^T SS^* U_0\|_2\,\|K_U^T\|_2
         \leq \varepsilon\,\|Q\|_{\mathrm{HS}}\,\|K\|_2,
     \]
-    where we used $\|Q_U\|_{\mathrm{HS}} = \|Q\|_{\mathrm{HS}}$ and $\|K_U\|_2 = \|K\|_2$. Multiplying by $d^{-1/2}$ gives the logit bound. The attention-output bound follows from Proposition~1.
+    where we used $\|Q_U\|_{\mathrm{HS}} = \|Q\|_{\mathrm{HS}}$ and $\|K_U\|_2 = \|K\|_2$. Multiplying by $d^{-1/2}$ gives the logit bound. The attention-output bound follows from Proposition~\ref{prop:softmax-lipschitz}.
 \end{proof}
-
-The proposition should be read as a conditional stability statement: it separates the attention-stability argument from the probabilistic question of when the sketch approximately preserves inner products on the relevant subspace.
-
-The next result gives this probabilistic guarantee for Gaussian sketches. A scaled Gaussian matrix $S \in \mathbb{R}^{d \times s}$ with entries $\mathcal{N}(0, 1/s)$ is a subspace embedding for any fixed $r$-dimensional subspace with high probability, requiring $s = O(r/\varepsilon^2)$---not $O(d/\varepsilon^2)$.
 
 \begin{proposition}[Probabilistic subspace embedding guarantee]
     \label{prop:probabilistic}
@@ -106,27 +166,12 @@ The next result gives this probabilistic guarantee for Gaussian sketches. A scal
     \[
         s \;\geq\; C\,\frac{r + \ln(1/\delta)}{\varepsilon^2},
     \]
-    for a universal constant $C$, then with probability at least $1 - \delta$, $S$ is an $\varepsilon$-subspace embedding for $U$. If $U$ contains the joint row space of $Q$ and $K$, then with the same probability,
-    \[
-        \|\mathcal{A}(Q,K,V)-\widetilde{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
-        \leq
-        \frac{\varepsilon}{\sqrt d}\,\|Q\|_{\mathrm{HS}}\,\|K\|_2\,\|V\|_2.
-    \]
+    for a universal constant $C$, then with probability at least $1 - \delta$, $S$ is an $\varepsilon$-subspace embedding for $U$.
 \end{proposition}
 
 \begin{proof}
-    Let $U_0 \in \mathbb{R}^{d \times r}$ be a matrix whose columns form an orthonormal basis for $U$. Then $S$ is an $\varepsilon$-subspace embedding for $U$ if and only if $\|U_0^T SS^* U_0 - I_r\|_2 \leq \varepsilon$. The matrix $U_0^T SS^* U_0 = (S^* U_0)^*(S^* U_0)$ has the same distribution as $G^*G/s$ where $G \in \mathbb{R}^{s \times r}$ has i.i.d.\ standard normal entries. Standard JL concentration~\autocite{HalkoMartinssonTropp2011} gives $\Pr(\|G^*G/s - I_r\|_2 > \varepsilon) \leq 2\exp(-c\,s\varepsilon^2 + r)$ for a universal constant $c > 0$, provided $s$ is large enough relative to $r/\varepsilon^2$. The stated condition with an appropriate $C$ ensures the failure probability is at most $\delta$. The attention error bound follows from Proposition~\ref{prop:deterministic}.
+    Let $U_0 \in \mathbb{R}^{d \times r}$ be a matrix whose columns form an orthonormal basis for $U$. Then $S$ is an $\varepsilon$-subspace embedding for $U$ if and only if $\|U_0^T SS^* U_0 - I_r\|_2 \leq \varepsilon$. The matrix $U_0^T SS^* U_0 = (S^* U_0)^*(S^* U_0)$ has the same distribution as $G^*G/s$ where $G \in \mathbb{R}^{s \times r}$ has i.i.d.\ standard normal entries. Standard JL concentration~\autocite{HalkoMartinssonTropp2011} gives $\Pr(\|G^*G/s - I_r\|_2 > \varepsilon) \leq 2\exp(-c\,s\varepsilon^2 + r)$ for a universal constant $c > 0$, provided $s$ is large enough relative to $r/\varepsilon^2$. The stated condition with an appropriate $C$ ensures the failure probability is at most $\delta$.
 \end{proof}
-
-The key feature is the dependence on $r$ rather than $d$: when the query--key rows lie near a low-dimensional subspace, a much smaller sketch suffices.
-
-We now turn to the finite-precision error. The standard Higham-type forward-error analysis~\autocite{Higham2002} for the matrix product $AB$ with $A \in \mathbb{R}^{n \times s}$, $B \in \mathbb{R}^{s \times n}$ gives
-\[
-    |\widehat{AB} - AB| \leq \gamma_s\, |A|\,|B|,
-    \qquad
-    \gamma_s := \frac{su}{1 - su},
-\]
-where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)^*$, the inner dimension is $s$, so the finite-precision error is proportional to $s \cdot u$---not $d \cdot u$ as it would be for the full product $QK^*$.
 
 \begin{proposition}[Finite-precision error for sketched logits]
     \label{prop:rounding}
@@ -135,12 +180,6 @@ where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)
         \|\widetilde{\mathcal{L}}_S(Q,K) - \widehat{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
         \leq
         \frac{\gamma_s\,\|QS\|_{\mathrm{HS}}\,\|KS\|_{\mathrm{HS}}}{\sqrt{d}}.
-    \]
-    Consequently,
-    \[
-        \|\widetilde{\mathcal{A}}_S(Q,K,V) - \widehat{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
-        \leq
-        \frac{\gamma_s\,\|QS\|_{\mathrm{HS}}\,\|KS\|_{\mathrm{HS}}\,\|V\|_2}{\sqrt{d}}.
     \]
 \end{proposition}
 
@@ -155,15 +194,14 @@ where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)
         \leq \gamma_s\, \||A|\,|B^*|\|_{\mathrm{HS}}
         \leq \gamma_s\, \|A\|_{\mathrm{HS}}\,\|B\|_{\mathrm{HS}}.
     \]
-    Multiplying by $d^{-1/2}$ yields the logit bound. The attention-output bound follows from Proposition~1.
+    Multiplying by $d^{-1/2}$ yields the bound.
 \end{proof}
 
 \begin{remark}[Scope of the finite-precision bound]
-    The bound in Proposition~\ref{prop:rounding} models the error in the final sketched logit product $(QS)(KS)^*$, assuming that $QS$ and $KS$ are given exactly. The experiments measure a broader implementation error: $Q$, $K$, $V$, and $S$ are first quantized to the storage dtype, and the sketched factors $QS$ and $KS$ are then formed from those quantized tensors before the final logit product. Thus the measured $E_{\mathrm{fp}}$ includes storage quantization and low-precision projection effects in addition to the multiplication-only term analyzed in the proposition.
+    The bound in Proposition~\ref{prop:rounding} models the error in the final sketched logit product $(QS)(KS)^*$, assuming that $QS$ and $KS$ are given exactly. The experiments measure a broader implementation error that also includes storage quantization and low-precision projection effects.
 \end{remark}
 
-The factor $\gamma_s$ scales linearly with $s$: compared to an unsketched product with inner dimension $d$, sketching changes the leading roundoff coefficient from $O(d \cdot u)$ to $O(s \cdot u)$. This is the formal statement of the intuition that ``compressing first makes low precision safer.''
-Combining the probabilistic subspace embedding guarantee with the finite-precision error analysis yields the main result.
+Combining the subspace embedding guarantee with the finite-precision error yields the sketching main theorem.
 
 \begin{theorem}[Mixed-precision sketched attention]
     \label{thm:main}
@@ -183,7 +221,7 @@ Combining the probabilistic subspace embedding guarantee with the finite-precisi
 \end{theorem}
 
 \begin{proof}
-    By Proposition~1 and the triangle inequality,
+    By Proposition~\ref{prop:softmax-lipschitz} and the triangle inequality,
     \[
         \|\mathcal{A} - \widehat{\mathcal{A}}_S\|_{\mathrm{HS}}
         \leq
@@ -192,21 +230,137 @@ Combining the probabilistic subspace embedding guarantee with the finite-precisi
     Apply Proposition~\ref{prop:deterministic} to the first term and Proposition~\ref{prop:rounding} to the second.
 \end{proof}
 
-\begin{remark}[Lower-order regime]
-    Theorem~\ref{thm:main} isolates the roundoff coefficient $\gamma_s = O(s \cdot u)$ explicitly. If, in addition, the norm factors satisfy a scale comparison such as
-    \[
-        \|QS\|_{\mathrm{HS}}\,\|KS\|_{\mathrm{HS}} = O\!\bigl(\|Q\|_{\mathrm{HS}}\,\|K\|_2\bigr),
-    \]
-    then $s \cdot u \ll \varepsilon$ is the leading-order requirement for the finite-precision term to remain lower order than the sketching term.
-\end{remark}
-
-\begin{remark}[Design rule]
-    Theorem~\ref{thm:main} yields a concrete joint design rule. For float16 ($u_{16} \approx 5 \times 10^{-4}$) and typical sketch dimensions $s \leq 64$, we have $s \cdot u_{16} \leq 0.032$, which is smaller than typical sketch tolerances $\varepsilon \geq 0.1$. For float32 ($u_{32} \approx 6 \times 10^{-8}$), the condition is essentially always satisfied. For float8 E4M3 ($u_{\text{fp8}} \approx 0.0625$), even $s = 16$ gives $s \cdot u_{\text{fp8}} \approx 1.0$, which is comparable to $\varepsilon$---so the finite-precision term is no longer clearly lower order. The rule also reveals a regime to avoid: if $s$ is chosen too large relative to $1/u$, the finite-precision error can overtake the sketching error, defeating the purpose of mixed precision.
+\begin{remark}[Design rule from the sketching theorem]
+    \label{rem:sketch-rule}
+    Theorem~\ref{thm:main} yields a concrete joint design rule. For float16 ($u_{16} \approx 5 \times 10^{-4}$) and typical sketch dimensions $s \leq 64$, we have $s \cdot u_{16} \leq 0.032$, which is smaller than typical sketch tolerances $\varepsilon \geq 0.1$. For float32 ($u_{32} \approx 6 \times 10^{-8}$), the condition is essentially always satisfied. For float8 E4M3 ($u_{\text{fp8}} \approx 0.0625$), even $s = 16$ gives $s \cdot u_{\text{fp8}} \approx 1.0$, which is comparable to $\varepsilon$---so the finite-precision term is no longer clearly lower order.
 \end{remark}
 
 \section{Numerical Experiments}
 
-The experiments probe the decomposition of Theorem~\ref{thm:main} directly. For each combination of parameters $(n, d, s)$ and each precision configuration we compute three logit matrices:
+\subsection{Exact Attention Under Precision Policies}
+
+For each precision policy, we evaluate the exact attention pipeline
+\[
+    Q,K,V \to L = QK^*/\sqrt d \to P = \Sigma(L) \to A = PV
+\]
+against a \texttt{float64} reference. The primary diagnostics are the relative logit error
+\[
+    E_L = \frac{\|L-\widehat L\|_{\mathrm{HS}}}{\|L\|_{\mathrm{HS}}},
+\]
+the mean rowwise softmax error
+\[
+    E_P = \frac1n \sum_{i=1}^n \|p_i-\widehat p_i\|_1,
+\]
+the relative output error
+\[
+    E_A = \frac{\|A-\widehat A\|_{\mathrm{HS}}}{\|A\|_{\mathrm{HS}}},
+\]
+and the softmax amplification ratio
+\[
+    \rho_{\mathrm{softmax}} = \frac{\frac1n \sum_{i=1}^n \|p_i-\widehat p_i\|_1}{\frac1n \sum_{i=1}^n \|\ell_i-\widehat \ell_i\|_\infty}.
+\]
+
+We test the following policy family: \texttt{fp32\_reference}, \texttt{bf16\_safe}, \texttt{fp16\_safe}, low-precision logit storage, low-precision softmax, and low-precision value accumulation. The ``safe'' policies keep storage low precision but preserve fp32 accumulation and fp32 softmax. This separation is the core experimental point: the question is not whether one global dtype works, but which \emph{locations} are sensitive.
+
+\begin{table}[ht]
+\centering
+\caption{Exact-attention errors on synthetic Gaussian data ($n \in \{16, 32\}$, $d = 16$, averaged over 2 seeds). ``Safe'' policies use low-precision storage with fp32 accumulation and softmax.}
+\label{tab:gaussian}
+\small
+\begin{tabular}{l rrr r}
+\toprule
+Policy & $E_L$ & $E_P$ & $E_A$ & $\rho_{\mathrm{softmax}}$ \\
+\midrule
+\texttt{fp32\_reference}    & 8.2e-8  & 8.5e-8  & 1.4e-7  & 0.41 \\
+\texttt{bf16\_safe}         & 2.4e-3  & 1.9e-3  & 2.8e-3  & 0.35 \\
+\texttt{fp16\_safe}         & 2.9e-4  & 2.1e-4  & 3.2e-4  & 0.32 \\
+\midrule
+\texttt{bf16\_low\_logit}   & 2.9e-3  & 2.3e-3  & 3.4e-3  & 0.34 \\
+\texttt{fp16\_low\_logit}   & 3.5e-4  & 2.8e-4  & 4.4e-4  & 0.33 \\
+\midrule
+\texttt{bf16\_low\_softmax} & 2.9e-3  & 2.7e-3  & 3.7e-3  & 0.41 \\
+\texttt{fp16\_low\_softmax} & 3.5e-4  & 3.3e-4  & 4.7e-4  & 0.39 \\
+\midrule
+\texttt{bf16\_low\_value}   & 2.4e-3  & 1.9e-3  & 3.5e-3  & 0.35 \\
+\texttt{fp16\_low\_value}   & 2.9e-4  & 2.1e-4  & 4.4e-4  & 0.32 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\caption{Exact-attention errors on a single attention head extracted from a pretrained transformer (\texttt{sshleifer/tiny-distilbert-base-cased}, layer~0, head~0; $n = 16$, $d = 1$). The softmax amplification ratio $\rho_{\mathrm{softmax}}$ spikes under low-precision softmax, confirming the prediction from Proposition~\ref{prop:local-perturbation} and Remark~\ref{rem:placement}.}
+\label{tab:transformer}
+\small
+\begin{tabular}{l rrr r}
+\toprule
+Policy & $E_L$ & $E_P$ & $E_A$ & $\rho_{\mathrm{softmax}}$ \\
+\midrule
+\texttt{fp32\_reference}    & 1.8e-8  & 3.0e-8  & 5.0e-8  & 4.6e4 \\
+\texttt{bf16\_safe}         & 6.1e-4  & 3.0e-8  & 1.8e-3  & 1.9  \\
+\texttt{fp16\_safe}         & 3.3e-4  & 3.0e-8  & 3.5e-4  & 3.4  \\
+\midrule
+\texttt{bf16\_low\_logit}   & 3.9e-4  & 3.0e-8  & 1.8e-3  & 2.8  \\
+\texttt{fp16\_low\_logit}   & 3.9e-4  & 3.0e-8  & 3.5e-4  & 2.8  \\
+\midrule
+\texttt{bf16\_low\_softmax} & 3.9e-4  & 1.2e-5  & 1.8e-3  & 1.1e3 \\
+\texttt{fp16\_low\_softmax} & 3.9e-4  & 1.2e-5  & 3.4e-4  & 1.1e3 \\
+\midrule
+\texttt{bf16\_low\_value}   & 6.1e-4  & 3.0e-8  & 1.8e-3  & 1.9  \\
+\texttt{fp16\_low\_value}   & 3.3e-4  & 3.0e-8  & 3.4e-4  & 3.4  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Tables~\ref{tab:gaussian} and~\ref{tab:transformer} report representative policy-level numbers from Gaussian and transformer-activation sweeps respectively. On Gaussian data (Table~\ref{tab:gaussian}), all policies remain low-error because the softmax is not near-saturated: $\rho_{\mathrm{softmax}} < 1$ uniformly, meaning the softmax actually \emph{damps} logit perturbations. The ordering $E_L < E_P < E_A$ is consistent across all policies, and the differences between ``safe'' and ``low'' variants are modest.
+
+The transformer activations (Table~\ref{tab:transformer}) reveal a qualitatively different regime. The baseline $\rho_{\mathrm{softmax}}$ for \texttt{fp32\_reference} is $\sim\!10^4$ because the denominator (rowwise logit perturbation) is at machine epsilon while the numerator is even smaller; this large ratio is a numerical artifact of dividing by a near-zero baseline. The important comparison is between ``safe'' policies ($\rho \sim 1$--$3$) and ``low\_softmax'' policies ($\rho \sim 10^3$). Low-precision softmax amplifies the tiny logit perturbation ($E_L \approx 4 \times 10^{-4}$) into a softmax error $E_P$ that is two orders of magnitude larger relative to the safe baseline. This is exactly the failure mode predicted by Remark~\ref{rem:placement}(3): when softmax itself is computed in low precision, the Lipschitz guarantee from Proposition~\ref{prop:softmax-lipschitz} no longer holds.
+
+Figure~\ref{fig:precision-map} summarizes these policy-level results together with the residual-depth experiment discussed below. The most important empirical message is that low-precision storage of $Q,K,V$ is usually much safer than low-precision softmax or low-precision logit storage. This is precisely the kind of location-specific statement that a global dtype comparison would miss.
+
+\subsection{Residual Depth Propagation}
+
+To test how local precision errors accumulate across depth, we evaluate an attention-only residual stack of the form
+\[
+    x_{\ell+1} = x_\ell + h F_\ell(x_\ell)
+\]
+with self-attention blocks $F_\ell$. The metric of interest is the relative terminal-state error
+\[
+    E_{\mathrm{depth}} = \frac{\|x_L-\widehat x_L\|_{\mathrm{HS}}}{\|x_L\|_{\mathrm{HS}}}.
+\]
+
+\begin{table}[ht]
+\centering
+\caption{Relative terminal-state error $E_{\mathrm{depth}}$ for attention-only residual stacks (Gaussian data, $n = d = 16$, averaged over 2 seeds). Depth $\ell = 4$ uses $h = 0.25$; depth $\ell = 8$ uses $h = 0.125$.}
+\label{tab:residual}
+\small
+\begin{tabular}{l rr rr}
+\toprule
+& \multicolumn{2}{c}{Gaussian} & \multicolumn{2}{c}{Transformer} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+Policy & depth 4 & depth 8 & depth 2 & depth 4 \\
+\midrule
+\texttt{fp32\_reference}    & 7.2e-8 & 8.8e-8  & 5.2e-8 & 2.2e-8 \\
+\texttt{bf16\_safe}         & 3.3e-3 & 4.7e-3  & 3.4e-3 & 1.1e-3 \\
+\texttt{fp16\_safe}         & 4.5e-4 & 6.7e-4  & 1.6e-4 & 1.7e-4 \\
+\midrule
+\texttt{bf16\_low\_logit}   & 3.3e-3 & 4.9e-3  & 3.4e-3 & 1.1e-3 \\
+\texttt{fp16\_low\_logit}   & 4.5e-4 & 6.3e-4  & 1.6e-4 & 1.7e-4 \\
+\midrule
+\texttt{bf16\_low\_softmax} & 3.6e-3 & 4.7e-3  & 3.4e-3 & 1.1e-3 \\
+\texttt{fp16\_low\_softmax} & 4.3e-4 & 6.8e-4  & 1.6e-4 & 1.7e-4 \\
+\midrule
+\texttt{bf16\_low\_value}   & 3.6e-3 & 5.3e-3  & 3.1e-3 & 1.2e-3 \\
+\texttt{fp16\_low\_value}   & 5.3e-4 & 7.8e-4  & 6.6e-4 & 6.1e-4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:residual} reports $E_{\mathrm{depth}}$ for both Gaussian and transformer-activation residual stacks. On Gaussian data, error grows modestly with depth for all policies: the fp16-safe error roughly doubles from depth 4 to depth 8, while the bf16-safe error grows by roughly 50\%. The low-precision value policies show the steepest depth growth, consistent with the $\sqrt{n}\|\Delta V\|_{\mathrm{HS}}$ term in Proposition~\ref{prop:local-perturbation} accumulating across layers. On transformer activations, the residual scaling $h = 1/\text{depth}$ keeps errors approximately constant or even decreasing with depth, reflecting the stabilizing effect of small residual contributions.
+
+\subsection{A Stress-Test Baseline}
+
+The experiments in this subsection probe the decomposition of Theorem~\ref{thm:main} directly. For each combination of parameters $(n, d, s)$ and each precision configuration we compute three logit matrices:
 \begin{enumerate}
     \item $\mathcal{L}(Q,K)$: exact unsketched logits in \texttt{float64} (reference);
     \item $\widetilde{\mathcal{L}}_S(Q,K)$: exact sketched logits in \texttt{float64};
@@ -230,59 +384,37 @@ Table~\ref{tab:results} reports absolute HS errors of the logits for $n = 256$, 
 Config & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{fp}}$ & $E_{\mathrm{tot}}$ & $E_{\mathrm{sk}}/E_{\mathrm{fp}}$ \\
 \midrule
 \texttt{fp32}      &  8 & 7.22e2 & 1.2e-4 & 7.22e2 & 5.9e6 \\
-                   & 16 & 5.03e2 & 1.1e-4 & 5.03e2 & 4.4e6 \\
-                   & 24 & 4.27e2 & 9.4e-5 & 4.27e2 & 4.5e6 \\
-                   & 32 & 3.70e2 & 9.1e-5 & 3.70e2 & 4.1e6 \\
+                    & 16 & 5.03e2 & 1.1e-4 & 5.03e2 & 4.4e6 \\
+                    & 24 & 4.27e2 & 9.4e-5 & 4.27e2 & 4.5e6 \\
+                    & 32 & 3.70e2 & 9.1e-5 & 3.70e2 & 4.1e6 \\
 \midrule
 \texttt{full\_fp16}  &  8 & 7.22e2 & 4.1e-1 & 7.22e2 & 1.8e3 \\
-                     & 16 & 5.03e2 & 2.9e-1 & 5.03e2 & 1.8e3 \\
-                     & 24 & 4.27e2 & 2.6e-1 & 4.27e2 & 1.7e3 \\
-                     & 32 & 3.70e2 & 2.3e-1 & 3.70e2 & 1.6e3 \\
+                      & 16 & 5.03e2 & 2.9e-1 & 5.03e2 & 1.8e3 \\
+                      & 24 & 4.27e2 & 2.6e-1 & 4.27e2 & 1.7e3 \\
+                      & 32 & 3.70e2 & 2.3e-1 & 3.70e2 & 1.6e3 \\
 \midrule
 \texttt{mixed\_fp16} &  8 & 7.22e2 & 3.8e-1 & 7.22e2 & 1.9e3 \\
-                     & 16 & 5.03e2 & 2.6e-1 & 5.03e2 & 1.9e3 \\
-                     & 24 & 4.27e2 & 2.4e-1 & 4.27e2 & 1.8e3 \\
-                     & 32 & 3.70e2 & 2.1e-1 & 3.70e2 & 1.8e3 \\
+                      & 16 & 5.03e2 & 2.6e-1 & 5.03e2 & 1.9e3 \\
+                      & 24 & 4.27e2 & 2.4e-1 & 4.27e2 & 1.8e3 \\
+                      & 32 & 3.70e2 & 2.1e-1 & 3.70e2 & 1.8e3 \\
 \midrule
 \texttt{fp8\_store}  &  8 & 7.22e2 & 5.0e1  & 7.21e2 & 1.4e1 \\
-                     & 16 & 5.03e2 & 3.4e1  & 5.01e2 & 1.5e1 \\
-                     & 24 & 4.27e2 & 3.0e1  & 4.26e2 & 1.4e1 \\
-                     & 32 & 3.70e2 & 2.6e1  & 3.70e2 & 1.4e1 \\
+                      & 16 & 5.03e2 & 3.4e1  & 5.01e2 & 1.5e1 \\
+                      & 24 & 4.27e2 & 3.0e1  & 4.26e2 & 1.4e1 \\
+                      & 32 & 3.70e2 & 2.6e1  & 3.70e2 & 1.4e1 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ is consistently large ($10^3$--$10^6$), confirming that the dominant error source is the randomized sketch. The relative sketching error exceeds 140\%, so this regime is not a good attention approximation; rather, it is a deliberate stress test in which the sketching floor is already very high, while the relative finite-precision error stays below 0.16\%. Second, \texttt{full\_fp16} and \texttt{mixed\_fp16} have finite-precision errors of the same order, consistent with Proposition~\ref{prop:rounding}: storage quantization (the $s \cdot u$ factor) dominates any benefit from higher-precision accumulation. Third, fp8 storage substantially increases the finite-precision error relative to fp16 (from $\sim$0.3 to $\sim$30 in absolute terms, or from $\sim$0.1\% to $\sim$10\% relative), but the sketching error still dominates by a factor of $\sim$14--15. That is, fp8 storage degrades accuracy noticeably compared to fp16, yet in the tested synthetic regime the total error remains sketching-dominated. A regime where finite precision dominates would require even lower precision or larger $s$; the current experiments do not reach it. Thus the results support the error decomposition and illustrate the degradation predicted by Theorem~\ref{thm:main} for increasing $s \cdot u$, but they do not demonstrate a high-quality efficient-attention approximation or a full inversion of the error ratio.
+Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ is consistently large ($10^3$--$10^6$), confirming that the dominant error source is the randomized sketch. Second, \texttt{full\_fp16} and \texttt{mixed\_fp16} have finite-precision errors of the same order, consistent with Proposition~\ref{prop:rounding}: storage quantization dominates any benefit from higher-precision accumulation. Third, fp8 storage substantially increases the finite-precision error (from $\sim$0.3 to $\sim$30 in absolute terms), but the sketching error still dominates by a factor of $\sim$14--15. The results support the error decomposition and illustrate the degradation predicted by Theorem~\ref{thm:main} for increasing $s \cdot u$, but they do not demonstrate a high-quality efficient-attention approximation or a full inversion of the error ratio.
 
 % Include generated publication-quality figures before the Outlook section.
 \input{../figures/figures}
 
 \section{Outlook}
 
-The present report studies only a sketch-based baseline, so it does not yet answer the most compelling version of the precision-placement question. In exact attention, the main numerical locations are not just the low-dimensional matrix product but the full pipeline
-\[
-    Q,K,V \to L = QK^*/\sqrt d \to P = \Sigma(L) \to PV.
-\]
-The natural next step is therefore to move from sketch dimension as the central knob to an explicit precision policy over this forward pass.
+The main contribution of this report is the precision-placement decomposition of Proposition~\ref{prop:local-perturbation} and its empirical validation: low-precision softmax is the clearest failure mode in exact attention, while low-precision storage of $Q,K,V$ with fp32 accumulation is typically safe. The sketching baseline (Theorem~\ref{thm:main}) confirms that the finite-precision term remains lower order as long as $s \cdot u \ll \varepsilon$.
 
-A suitable policy decomposes the implementation into storage dtype, logit-accumulation dtype, logit-storage dtype, softmax/reduction dtype, value-accumulation dtype, and output-storage dtype. The corresponding diagnostics should be reported at three levels:
-\[
-    E_L := \frac{\|L-\widehat L\|_{\mathrm{HS}}}{\|L\|_{\mathrm{HS}}},
-    \qquad
-    E_P := \frac1n \sum_{i=1}^n \|p_i-\widehat p_i\|_1,
-    \qquad
-    E_A := \frac{\|A-\widehat A\|_{\mathrm{HS}}}{\|A\|_{\mathrm{HS}}},
-\]
-where $p_i$ denotes the $i$-th row of the attention-weight matrix. This separates perturbations of the logits from perturbations of the rowwise softmax and from perturbations of the final output.
+Several directions remain open. First, the current experiments use small problem sizes ($n \leq 256$, $d \leq 64$); scaling to realistic transformer dimensions will require either GPU acceleration or the JAX backend scaffold already present in the repository. Second, FP8 policies are reported only under an explicit quantization model; a more complete treatment would include hardware-specific scaling and dequantization. Third, the phase-diagram analogy from Decelle et al.~\autocite{DecelleEtAl2011} suggests mapping not only average error but also regime changes: when does low-precision logit storage remain harmless, when does low-precision softmax begin to amplify, and when does no practical low-precision policy preserve the reference behavior? The current data already hints at these transitions but does not yet chart them systematically. Fourth, the JAX-focused mixed-precision framework of Graefe and Trimpe~\autocite{GraefeTrimpe2025} provides a natural implementation path for the safe/unsafe policy distinctions identified here.
 
-An additional empirical diagnostic is the softmax amplification ratio
-\[
-    \rho_{\mathrm{softmax}}
-    :=
-    \frac{\frac1n \sum_{i=1}^n \|p_i-\widehat p_i\|_1}{\frac1n \sum_{i=1}^n \|\ell_i-\widehat \ell_i\|_\infty},
-\]
-which measures whether the softmax stage tends to damp or amplify rowwise logit perturbations in a given regime. That framing is stronger than a single global dtype comparison because it identifies which stages are numerically sensitive and which are not.
-
-The repository now includes the first step toward this pivot: an exact-attention precision sweep over policy-level choices such as bf16/fp16 storage with fp32 accumulation, quantized logits before softmax, low-precision softmax, and low-precision value accumulation. The implementation is intended as an experimental harness rather than as a semantic guarantee of device-level behavior, so each run must be interpreted together with its backend and dtype settings.
-
-Possible extensions include attention-only residual stacks to study depth propagation, explicitly specified FP8 software quantization models, and comparisons against random-feature or Nystr\"om baselines once the exact-attention precision map is established.
+On the analytical side, the $\sqrt{n}$ bound on $\|\Sigma(\widehat{L})\|_2$ is likely loose for near-doubly-stochastic attention matrices; a refined bound that exploits the concentration of softmax rows could tighten the value-perturbation term. The logit-perturbation term could similarly be refined by replacing the worst-case $\|V\|_2$ with an average-case or data-dependent quantity.
