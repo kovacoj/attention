@@ -8,11 +8,17 @@ on:
     branches: [main]
     paths:
       - "report/**"
+      - "figures/**"
+      - "README.md"
+      - "scripts/**"
       - ".github/workflows/report-pages.yml"
   pull_request:
     branches: [main]
     paths:
       - "report/**"
+      - "figures/**"
+      - "README.md"
+      - "scripts/**"
       - ".github/workflows/report-pages.yml"
   workflow_dispatch:
 
@@ -31,12 +37,13 @@ jobs:
           lfs: true
 
       - name: Compile report PDF
-        uses: xu-cheng/latex-action@v3
+        uses: xu-cheng/latex-action@v4
         with:
           working_directory: report
           root_file: paper.tex
           texlive_version: latest
           extra_system_packages: coreutils icu inkscape ghostscript perl sed findutils
+          pre_compile: tlmgr install keytheorems
 
       - name: Upload PDF artifact
         uses: actions/upload-artifact@v4
@@ -66,10 +73,11 @@ jobs:
       - name: Update deploy branch
         run: |
           cp paper.pdf deploy-dir/report.pdf
+          python3 scripts/build_pages.py README.md deploy-dir/index.html
           cd deploy-dir
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add report.pdf
+          git add index.html report.pdf
           if git diff --cached --quiet; then
             echo "No changes to deploy"
           else
