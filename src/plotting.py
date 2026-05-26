@@ -23,6 +23,19 @@ def _ensure_styles(styles_dir: Path) -> None:
     except Exception:
         # If style application fails, fall back to default rc
         pass
+    # Apply a few consistent tweaks to improve publication aesthetics
+    plt.rcParams.update(
+        {
+            "figure.figsize": (7.0, 3.2),
+            "figure.dpi": 150,
+            "savefig.dpi": 300,
+            "lines.linewidth": 1.2,
+            "lines.markersize": 4,
+            "legend.frameon": False,
+            "legend.fontsize": "small",
+            "font.family": "serif",
+        }
+    )
 
 
 def _get_field(row: dict, candidates: list[str], default=None):
@@ -70,7 +83,8 @@ def plot_rf_error_vs_m(csv_path: Path, out_path: Path, styles_dir: Path | None =
         key = (case.strip(), source.strip())
         groups.setdefault(key, []).append(r)
 
-    fig, ax = plt.subplots()
+    # Explicit figsize/dpi to ensure consistent rendering across environments
+    fig, ax = plt.subplots(figsize=plt.rcParams.get("figure.figsize"), dpi=plt.rcParams.get("figure.dpi"))
     colors = plt.rcParams.get("axes.prop_cycle").by_key().get("color", None)
     for i, ((case, source), items) in enumerate(sorted(groups.items())):
         m_vals = np.array([int(_get_field(it, ["m"], 0)) for it in items])
@@ -89,9 +103,13 @@ def plot_rf_error_vs_m(csv_path: Path, out_path: Path, styles_dir: Path | None =
     ax.set_ylabel("HS error (output)")
     ax.set_title(f"Random-feature errors vs $m$ — {csv_path.name}")
     ax.grid(True, which="both", ls=":")
-    ax.legend(fontsize="small", ncol=2)
+    # Place legend to the right of the axes to avoid overlapping the curves
+    try:
+        ax.legend(fontsize="small", ncol=1, loc="center left", bbox_to_anchor=(1.02, 0.5))
+    except Exception:
+        ax.legend(fontsize="small", ncol=2)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, bbox_inches="tight")
+    fig.savefig(out_path, bbox_inches="tight", dpi=plt.rcParams.get("savefig.dpi"))
 
 
 def _main(argv: list[str] | None = None) -> int:
