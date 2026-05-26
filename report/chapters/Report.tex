@@ -162,7 +162,7 @@ where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)
     The bound in Proposition~\ref{prop:rounding} models the error in the final sketched logit product $(QS)(KS)^*$, assuming that $QS$ and $KS$ are given exactly. The experiments measure a broader implementation error that also includes quantization of $Q$, $K$, $V$, and $S$ to the storage dtype before projection. Thus the measured $E_{\mathrm{fp}}$ is a broader implementation error than the multiplication-only term analyzed in the proposition.
 \end{remark}
 
-The factor $\gamma_s$ scales linearly with $s$: sketching reduces the finite-precision error by a factor of $s/d$ compared to the unsketched product. This is the formal statement of the intuition that ``compressing first makes low precision safer.''
+The factor $\gamma_s$ scales linearly with $s$: compared to an unsketched product with inner dimension $d$, sketching changes the leading roundoff coefficient from $O(d \cdot u)$ to $O(s \cdot u)$. This is the formal statement of the intuition that ``compressing first makes low precision safer.''
 Combining the probabilistic subspace embedding guarantee with the finite-precision error analysis yields the main result.
 
 \begin{theorem}[Mixed-precision sketched attention]
