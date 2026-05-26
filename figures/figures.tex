@@ -5,7 +5,7 @@
 
 \begin{figure}[ht]
 \centering
-\includegraphics[width=0.95\linewidth]{../figures/rf_errors.pdf}
-\caption{Random-feature HS output errors vs feature dimension $m$ for the random-feature sweep. Solid markers show the intrinsic random-feature approximation error ($E_{\mathrm{rf}}$); dashed lines give the finite-precision contribution ($E_{\mathrm{fp}}$).}
-\label{fig:rf-errors}
+\includegraphics[width=0.98\linewidth]{../figures/precision_policy_map.pdf}
+\caption{Precision-placement map for exact attention. Rows correspond to explicit precision policies, columns to the principal diagnostics $E_L$, $E_P$, $E_A$, $\rho_{\mathrm{softmax}}$, and $E_{\mathrm{depth}}$. The Gaussian panel gives the synthetic baseline; the transformer panel uses a fixed head from a pretrained model. Safe policies with fp32 accumulation and fp32 softmax remain low-error, whereas low-precision softmax is the clearest failure mode through its sharp increase in $\rho_{\mathrm{softmax}}$.}
+\label{fig:precision-map}
 \end{figure}
