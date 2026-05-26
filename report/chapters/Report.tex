@@ -159,7 +159,7 @@ where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)
 \end{proof}
 
 \begin{remark}[Scope of the finite-precision bound]
-    The bound in Proposition~\ref{prop:rounding} models the error in the final sketched logit product $(QS)(KS)^*$, assuming that $QS$ and $KS$ are given exactly. The experiments measure a broader implementation error that also includes quantization of $Q$, $K$, $V$, and $S$ to the storage dtype before projection. Thus the measured $E_{\mathrm{fp}}$ is a broader implementation error than the multiplication-only term analyzed in the proposition.
+    The bound in Proposition~\ref{prop:rounding} models the error in the final sketched logit product $(QS)(KS)^*$, assuming that $QS$ and $KS$ are given exactly. The experiments measure a broader implementation error: $Q$, $K$, $V$, and $S$ are first quantized to the storage dtype, and the sketched factors $QS$ and $KS$ are then formed from those quantized tensors before the final logit product. Thus the measured $E_{\mathrm{fp}}$ includes storage quantization and low-precision projection effects in addition to the multiplication-only term analyzed in the proposition.
 \end{remark}
 
 The factor $\gamma_s$ scales linearly with $s$: compared to an unsketched product with inner dimension $d$, sketching changes the leading roundoff coefficient from $O(d \cdot u)$ to $O(s \cdot u)$. This is the formal statement of the intuition that ``compressing first makes low precision safer.''
@@ -212,9 +212,11 @@ The experiments probe the decomposition of Theorem~\ref{thm:main} directly. For 
     \item $\widetilde{\mathcal{L}}_S(Q,K)$: exact sketched logits in \texttt{float64};
     \item $\widehat{\mathcal{L}}_S(Q,K)$: sketched logits in the target precision.
 \end{enumerate}
-The sketching error is $E_{\mathrm{sk}} := \|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$ and the finite-precision error is $E_{\mathrm{fp}} := \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$. The total error is $E_{\mathrm{tot}} := \|\mathcal{L} - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$. The same decomposition is recorded for the attention output. We test four precision configurations: \texttt{fp32} (all stages in float32), \texttt{full\_fp16} (all stages in float16), \texttt{mixed\_fp16} (storage in float16, accumulation and softmax in float32), and \texttt{fp8\_store} (storage in float8 E4M3, accumulation and softmax in float32).
+The sketching error is $E_{\mathrm{sk}} := \|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$ and the finite-precision error is $E_{\mathrm{fp}} := \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$. The total error is $E_{\mathrm{tot}} := \|\mathcal{L} - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$. The same decomposition is recorded for the attention output. We test four precision configurations: \texttt{fp32} (all stages in float32), \texttt{full\_fp16} (storage, projection, final logit product, and softmax in float16), \texttt{mixed\_fp16} (storage and projection in float16, followed by a float32 final logit product and float32 softmax), and \texttt{fp8\_store} (storage and projection in float8 E4M3, followed by a float32 final logit product and float32 softmax).
 
 The sketch $S \in \mathbb{R}^{d \times s}$ is a scaled Gaussian matrix with i.i.d.\ $\mathcal{N}(0, 1/s)$ entries; the scaling is chosen so that $\mathbb{E}[SS^*] = I_d$. We sweep $n \in \{64, 128, 256\}$, $d \in \{32, 64\}$, $s \in \{8, 16, 24, 32\}$, and average over three seeds. Data and sketch seeds are independent. The full numerical results are available in the committed CSV file \texttt{results/attention\_sweep.csv}.
+
+Since the synthetic $Q$ and $K$ are i.i.d.\ Gaussian, their joint row space is typically full-dimensional, so for $d = 64$ and $s \leq 32$ the subspace-embedding regime from Proposition~\ref{prop:probabilistic} is not expected to hold. The experiment should therefore be read as an intentionally under-sketched stress test of the error decomposition, not as evidence that such small feature sketches preserve attention accurately.
 
 Table~\ref{tab:results} reports absolute HS errors of the logits for $n = 256$, $d = 64$, together with the ratio $E_{\mathrm{sk}}/E_{\mathrm{fp}}$; the output errors showed the same qualitative ordering and are omitted.
 
@@ -250,8 +252,34 @@ Config & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{fp}}$ & $E_{\mathrm{tot}}$ & $E_{
 \end{tabular}
 \end{table}
 
-Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ is consistently large ($10^3$--$10^6$), confirming that the dominant error source is the randomized sketch. The relative sketching error exceeds 140\%, while the relative finite-precision error is below 0.16\%. Second, \texttt{full\_fp16} and \texttt{mixed\_fp16} have finite-precision errors of the same order, consistent with Proposition~\ref{prop:rounding}: storage quantization (the $s \cdot u$ factor) dominates any benefit from higher-precision accumulation. Third, fp8 storage substantially increases the finite-precision error relative to fp16 (from $\sim$0.3 to $\sim$30 in absolute terms, or from $\sim$0.1\% to $\sim$10\% relative), but the sketching error still dominates by a factor of $\sim$14--15. That is, fp8 storage degrades accuracy noticeably compared to fp16, yet in the tested synthetic regime the total error remains sketching-dominated. A regime where finite precision dominates would require even lower precision or larger $s$; the current experiments do not reach it. Thus the results support the error decomposition and illustrate the degradation predicted by Theorem~\ref{thm:main} for increasing $s \cdot u$, but they do not demonstrate a full inversion of the error ratio.
+Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ is consistently large ($10^3$--$10^6$), confirming that the dominant error source is the randomized sketch. The relative sketching error exceeds 140\%, so this regime is not a good attention approximation; rather, it is a deliberate stress test in which the sketching floor is already very high, while the relative finite-precision error stays below 0.16\%. Second, \texttt{full\_fp16} and \texttt{mixed\_fp16} have finite-precision errors of the same order, consistent with Proposition~\ref{prop:rounding}: storage quantization (the $s \cdot u$ factor) dominates any benefit from higher-precision accumulation. Third, fp8 storage substantially increases the finite-precision error relative to fp16 (from $\sim$0.3 to $\sim$30 in absolute terms, or from $\sim$0.1\% to $\sim$10\% relative), but the sketching error still dominates by a factor of $\sim$14--15. That is, fp8 storage degrades accuracy noticeably compared to fp16, yet in the tested synthetic regime the total error remains sketching-dominated. A regime where finite precision dominates would require even lower precision or larger $s$; the current experiments do not reach it. Thus the results support the error decomposition and illustrate the degradation predicted by Theorem~\ref{thm:main} for increasing $s \cdot u$, but they do not demonstrate a high-quality efficient-attention approximation or a full inversion of the error ratio.
 
 \section{Outlook}
 
-The present report studies only the feature-sketch model $QK^* \approx QSS^*K^*$. The natural extensions are Nystr\"om-type approximations and random-feature approximations of the softmax kernel, which would connect the project more directly with the efficient-attention literature~\autocite{XiongEtAl2021, ChoromanskiEtAl2021}. Another direction is to replace the Gaussian sketch by a structured random matrix (e.g., a subsampled randomized Hadamard transform), which would yield the same subspace-embedding guarantees with lower computational cost. A possible extension would replace finite-dimensional matrices by Hilbert--Schmidt operators and study convergence under compactness or spectral-decay assumptions; we do not pursue this here.
+The present report studies only the feature-sketch model $QK^* \approx QSS^*K^*$. This is analytically transparent, but it is not the strongest empirical setting for efficient attention: it compresses the model dimension $d$, whereas the main computational bottleneck in long-sequence transformers is usually the sequence dimension $n$, and on generic Gaussian data the relevant row space is essentially full-dimensional. The most promising next step is therefore to move from feature sketching to random-feature approximation of the softmax kernel, following Performer-style constructions~\autocite{ChoromanskiEtAl2021}. In that setting one approximates
+\[
+    \exp\!\bigl(q^*k / \sqrt d\bigr) \approx \phi(q)^*\phi(k),
+\]
+which leads to a kernelized attention surrogate of the form
+\[
+    \widetilde{A}(Q,K,V) = \widetilde{D}^{-1}\Phi(Q)\Phi(K)^*V.
+\]
+This would support a more compelling error decomposition,
+\[
+    \|A - \widehat{A}\| \leq \|A - \widetilde{A}\| + \|\widetilde{A} - \widehat{A}\|,
+\]
+where the first term is the random-feature approximation error and the second is the additional finite-precision error. A natural design rule would then compare the random-feature dimension $m$ with the unit roundoff $u$ through a condition of the form $m u \ll \varepsilon_{\mathrm{rf}}$, where $\varepsilon_{\mathrm{rf}}$ is the random-feature error floor.
+
+\subsection{Random-Feature Prototype}
+
+The repository now contains a prototype implementation of this pivot. It uses a positive orthogonal random-feature map modeled on Performer-style constructions: the projection matrix is assembled from block-orthogonal Gaussian factors, and the exponential feature map is stabilized by subtracting a querywise maximum for queries and a global maximum for keys before exponentiation. This keeps the map positive while reducing overflow risk in finite precision.
+
+The prototype evaluates the decomposition
+\[
+    \|A - \widehat{A}\| \leq \|A - \widetilde{A}\| + \|\widetilde{A} - \widehat{A}\|,
+\]
+at three levels: the unnormalized softmax kernel, the normalized attention weights, and the final attention output. Here $A$ denotes exact softmax attention, $\widetilde{A}$ is the same random-feature approximation evaluated in \texttt{float64}, and $\widehat{A}$ is the corresponding low-precision implementation. The first term is therefore the intrinsic random-feature approximation floor, while the second isolates the additional precision loss for a fixed feature map.
+
+To make the experimental regimes more informative than the current full-rank Gaussian feature-sketch test, the prototype supports three input families: (i) i.i.d.\ Gaussian $Q,K,V$ as a baseline, (ii) low-rank synthetic activations of the form $Q = ZA + \sigma N_Q$, $K = ZB + \sigma N_K$, and (iii) query, key, and value tensors extracted from a selected head of a pretrained transformer layer on real text. This creates a direct path from mathematically controlled synthetic models to structured activations arising in an actual language model.
+
+That pivot allows experiments on more realistic data while keeping the mixed-precision question central. Other possible extensions are Nystr\"om-type approximations~\autocite{XiongEtAl2021}, structured random matrices in place of Gaussian sketches, and an operator-theoretic treatment for Hilbert--Schmidt limits under compactness or spectral-decay assumptions.
