@@ -316,7 +316,7 @@ Tables~\ref{tab:gaussian} and~\ref{tab:transformer} report representative policy
 
 The transformer activations (Table~\ref{tab:transformer}) reveal a qualitatively different regime. The baseline $\rho_{\mathrm{softmax}}$ for \texttt{fp32\_reference} is $\sim\!10^4$ because the denominator (rowwise logit perturbation) is at machine epsilon while the numerator is even smaller; this large ratio is a numerical artifact of dividing by a near-zero baseline. The important comparison is between ``safe'' policies ($\rho \sim 1$--$3$) and ``low\_softmax'' policies ($\rho \sim 10^3$). Low-precision softmax amplifies the tiny logit perturbation ($E_L \approx 4 \times 10^{-4}$) into a softmax error $E_P$ that is two orders of magnitude larger relative to the safe baseline. This is exactly the failure mode predicted by Remark~\ref{rem:placement}(3): when softmax itself is computed in low precision, the Lipschitz guarantee from Proposition~\ref{prop:softmax-lipschitz} no longer holds.
 
-Figure~\ref{fig:precision-map} summarizes these policy-level results together with the residual-depth experiment discussed below. The most important empirical message is that low-precision storage of $Q,K,V$ is usually much safer than low-precision softmax or low-precision logit storage. This is precisely the kind of location-specific statement that a global dtype comparison would miss.
+The most important empirical message across both tables is that low-precision storage of $Q,K,V$ is usually much safer than low-precision softmax or low-precision logit storage. This is precisely the kind of location-specific statement that a global dtype comparison would miss.
 
 \subsection{Residual Depth Propagation}
 
@@ -407,9 +407,6 @@ Config & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{fp}}$ & $E_{\mathrm{tot}}$ & $E_{
 \end{table}
 
 Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ is consistently large ($10^3$--$10^6$), confirming that the dominant error source is the randomized sketch. Second, \texttt{full\_fp16} and \texttt{mixed\_fp16} have finite-precision errors of the same order, consistent with Proposition~\ref{prop:rounding}: storage quantization dominates any benefit from higher-precision accumulation. Third, fp8 storage substantially increases the finite-precision error (from $\sim$0.3 to $\sim$30 in absolute terms), but the sketching error still dominates by a factor of $\sim$14--15. The results support the error decomposition and illustrate the degradation predicted by Theorem~\ref{thm:main} for increasing $s \cdot u$, but they do not demonstrate a high-quality efficient-attention approximation or a full inversion of the error ratio.
-
-% Include generated publication-quality figures before the Outlook section.
-\input{figures/figures}
 
 \section{Outlook}
 
