@@ -41,7 +41,7 @@ def read_results_csv(path: Path) -> list[dict]:
     return rows
 
 
-def plot_rf_error_vs_m(csv_path: Path, out_path: Path, styles_dir: Path | None = None) -> None:
+def plot_rf_error_vs_m(csv_path: Path, out_path: Path, styles_dir: Path | None = None, source_filter: str | None = None) -> None:
     """Plot random-feature rf and fp output errors vs feature dimension m.
 
     The CSV format can be either the compact summarizer format with columns
@@ -58,12 +58,14 @@ def plot_rf_error_vs_m(csv_path: Path, out_path: Path, styles_dir: Path | None =
     if not rows:
         raise RuntimeError(f"No rows in {csv_path}")
 
-    # Group by (case, source)
+    # Group by (case, source) (optionally filter by source)
     groups: dict[tuple[str, str], list[dict]] = {}
     for r in rows:
         case = _get_field(r, ["case", "label"], "")
         source = _get_field(r, ["source", "data_source"], "")
         if case is None or case == "":
+            continue
+        if source_filter is not None and source is not None and source_filter != source:
             continue
         key = (case.strip(), source.strip())
         groups.setdefault(key, []).append(r)
@@ -96,12 +98,13 @@ def _main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     if len(argv) < 2:
-        print("Usage: python -m src.plotting <input.csv> <output.pdf> [styles_dir]")
+        print("Usage: python -m src.plotting <input.csv> <output.pdf> [styles_dir] [source]")
         return 2
     csv_path = Path(argv[0])
     out_path = Path(argv[1])
     styles_dir = Path(argv[2]) if len(argv) >= 3 else None
-    plot_rf_error_vs_m(csv_path, out_path, styles_dir)
+    source_filter = argv[3] if len(argv) >= 4 else None
+    plot_rf_error_vs_m(csv_path, out_path, styles_dir, source_filter)
     print(f"Wrote plot to {out_path}")
     return 0
 
