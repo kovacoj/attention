@@ -45,7 +45,7 @@ jobs:
       - name: Compile report PDF
         run: |
           docker compose -f docker-compose.yaml build latex
-          docker compose -f docker-compose.yaml run --rm latex latexmk -g paper.tex
+          docker compose -f docker-compose.yaml run --rm --user "$(id -u):$(id -g)" latex latexmk -g paper.tex
 
       - name: Upload PDF artifact
         uses: actions/upload-artifact@v4
