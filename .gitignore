@@ -1,6 +1,7 @@
 .venv/
 uv.lock
 *.swp
+*:Zone.Identifier
 
 # Python
 __pycache__/

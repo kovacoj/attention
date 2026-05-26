@@ -1,10 +1,10 @@
 \section{Introduction}
 
-The purpose of this report is to study one analytically transparent component of the transformer architecture~\autocite{Vaswani2017}: scaled dot-product attention. Two strands are particularly relevant. The first, rooted in randomized numerical linear algebra~\autocite{HalkoMartinssonTropp2011, Mahoney2016}, replaces the full attention matrix by a sketched surrogate~\autocite{WangEtAl2020, XiongEtAl2021, ChoromanskiEtAl2021}. The second, driven by hardware constraints, carries out the computation in reduced precision~\autocite{MicikeviciusEtAl2018}.
+The purpose of this report is to study one analytically transparent component of the transformer architecture~\autocite{Vaswani2017}: scaled dot-product attention. The broader question is a precision-placement question: which stages of the forward pass can safely run in low precision, and which still require higher-precision accumulation or reduction? The relevant stages include storage of the query, key, and value tensors, the logit product $QK^T$, logit storage, the rowwise softmax, and the final value product.
 
-These two approximation strategies are typically studied in isolation. This report asks what happens when they are composed: when the query-key logit computation is approximated by a randomized sketch, can the subsequent computation be carried out in mixed precision with only a lower-order loss of accuracy?
+The present draft approaches that question through a deliberately simple baseline. Rather than analyzing the full exact-attention pipeline immediately, it studies a sketched surrogate rooted in randomized numerical linear algebra~\autocite{HalkoMartinssonTropp2011, Mahoney2016, WangEtAl2020, XiongEtAl2021, ChoromanskiEtAl2021}. This keeps the error decomposition explicit: one term comes from the low-dimensional approximation itself, and another from the floating-point implementation of the reduced computation.
 
-The answer, as we show, is yes---and the mechanism is precise. Sketching reduces the effective dimension of the matrix product from $d$ to $s$, which simultaneously controls the sketching error (via the intrinsic rank of the query--key subspace) and shrinks the finite-precision error (because the inner dimension of the product is smaller). The main result (Theorem~\ref{thm:main}) gives an explicit total error bound and highlights the condition $s \cdot u \ll \varepsilon$ as the leading-order requirement for the finite-precision term to remain lower order when the accompanying norm factors are of comparable scale, where $s$ is the sketch dimension, $u$ is the unit roundoff, and $\varepsilon$ is the sketch tolerance. This condition provides a concrete design rule: sketch dimension and precision should be chosen jointly, not independently.
+That baseline is not intended as the final empirical claim of the project. On generic Gaussian data, the sketching floor is often so large that the main experiment becomes a stress test rather than a competitive attention approximation. Its value is therefore methodological: it isolates the mechanism by which inner dimension, accumulation precision, and softmax stability interact. The main result (Theorem~\ref{thm:main}) makes this interaction explicit through the condition $s \cdot u \ll \varepsilon$, where $s$ is the sketch dimension, $u$ is the unit roundoff, and $\varepsilon$ is the sketch tolerance. The next phase of the project is to carry the same decomposition over to exact attention under explicit precision policies.
 
 \section{Operator-Theoretic Setup}
 
@@ -259,30 +259,30 @@ Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\m
 
 \section{Outlook}
 
-The present report studies only the feature-sketch model $QK^* \approx QSS^*K^*$. This is analytically transparent, but it is not the strongest empirical setting for efficient attention: it compresses the model dimension $d$, whereas the main computational bottleneck in long-sequence transformers is usually the sequence dimension $n$, and on generic Gaussian data the relevant row space is essentially full-dimensional. The most promising next step is therefore to move from feature sketching to random-feature approximation of the softmax kernel, following Performer-style constructions~\autocite{ChoromanskiEtAl2021}. In that setting one approximates
+The present report studies only a sketch-based baseline, so it does not yet answer the most compelling version of the precision-placement question. In exact attention, the main numerical locations are not just the low-dimensional matrix product but the full pipeline
 \[
-    \exp\!\bigl(q^*k / \sqrt d\bigr) \approx \phi(q)^*\phi(k),
+    Q,K,V \to L = QK^*/\sqrt d \to P = \Sigma(L) \to PV.
 \]
-which leads to a kernelized attention surrogate of the form
+The natural next step is therefore to move from sketch dimension as the central knob to an explicit precision policy over this forward pass.
+
+A suitable policy decomposes the implementation into storage dtype, logit-accumulation dtype, logit-storage dtype, softmax/reduction dtype, value-accumulation dtype, and output-storage dtype. The corresponding diagnostics should be reported at three levels:
 \[
-    \widetilde{A}(Q,K,V) = \widetilde{D}^{-1}\Phi(Q)\Phi(K)^*V.
+    E_L := \frac{\|L-\widehat L\|_{\mathrm{HS}}}{\|L\|_{\mathrm{HS}}},
+    \qquad
+    E_P := \frac1n \sum_{i=1}^n \|p_i-\widehat p_i\|_1,
+    \qquad
+    E_A := \frac{\|A-\widehat A\|_{\mathrm{HS}}}{\|A\|_{\mathrm{HS}}},
 \]
-This would support a more compelling error decomposition,
+where $p_i$ denotes the $i$-th row of the attention-weight matrix. This separates perturbations of the logits from perturbations of the rowwise softmax and from perturbations of the final output.
+
+An additional empirical diagnostic is the softmax amplification ratio
 \[
-    \|A - \widehat{A}\| \leq \|A - \widetilde{A}\| + \|\widetilde{A} - \widehat{A}\|,
+    \rho_{\mathrm{softmax}}
+    :=
+    \frac{\frac1n \sum_{i=1}^n \|p_i-\widehat p_i\|_1}{\frac1n \sum_{i=1}^n \|\ell_i-\widehat \ell_i\|_\infty},
 \]
-where the first term is the random-feature approximation error and the second is the additional finite-precision error. A natural design rule would then compare the random-feature dimension $m$ with the unit roundoff $u$ through a condition of the form $m u \ll \varepsilon_{\mathrm{rf}}$, where $\varepsilon_{\mathrm{rf}}$ is the random-feature error floor.
+which measures whether the softmax stage tends to damp or amplify rowwise logit perturbations in a given regime. That framing is stronger than a single global dtype comparison because it identifies which stages are numerically sensitive and which are not.
 
-\subsection{Random-Feature Prototype}
+The repository now includes the first step toward this pivot: an exact-attention precision sweep over policy-level choices such as bf16/fp16 storage with fp32 accumulation, quantized logits before softmax, low-precision softmax, and low-precision value accumulation. The implementation is intended as an experimental harness rather than as a semantic guarantee of device-level behavior, so each run must be interpreted together with its backend and dtype settings.
 
-The repository now contains a prototype implementation of this pivot. It uses a positive orthogonal random-feature map modeled on Performer-style constructions: the projection matrix is assembled from block-orthogonal Gaussian factors, and the exponential feature map is stabilized by subtracting a querywise maximum for queries and a global maximum for keys before exponentiation. This keeps the map positive while reducing overflow risk in finite precision.
-
-The prototype evaluates the decomposition
-\[
-    \|A - \widehat{A}\| \leq \|A - \widetilde{A}\| + \|\widetilde{A} - \widehat{A}\|,
-\]
-at three levels: the unnormalized softmax kernel, the normalized attention weights, and the final attention output. Here $A$ denotes exact softmax attention, $\widetilde{A}$ is the same random-feature approximation evaluated in \texttt{float64}, and $\widehat{A}$ is the corresponding low-precision implementation. The first term is therefore the intrinsic random-feature approximation floor, while the second isolates the additional precision loss for a fixed feature map.
-
-To make the experimental regimes more informative than the current full-rank Gaussian feature-sketch test, the prototype supports three input families: (i) i.i.d.\ Gaussian $Q,K,V$ as a baseline, (ii) low-rank synthetic activations of the form $Q = ZA + \sigma N_Q$, $K = ZB + \sigma N_K$, and (iii) query, key, and value tensors extracted from a selected head of a pretrained transformer layer on real text. This creates a direct path from mathematically controlled synthetic models to structured activations arising in an actual language model.
-
-That pivot allows experiments on more realistic data while keeping the mixed-precision question central. Other possible extensions are Nystr\"om-type approximations~\autocite{XiongEtAl2021}, structured random matrices in place of Gaussian sketches, and an operator-theoretic treatment for Hilbert--Schmidt limits under compactness or spectral-decay assumptions.
+Possible extensions include attention-only residual stacks to study depth propagation, explicitly specified FP8 software quantization models, and comparisons against random-feature or Nystr\"om baselines once the exact-attention precision map is established.

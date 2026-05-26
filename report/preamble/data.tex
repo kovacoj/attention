@@ -3,8 +3,8 @@
 \newcommand*{\ThesisType}{report}
 
 %% Document title and metadata
-\newcommand*{\ThesisTitle}{Mixed-Precision Randomized Sketching for Scaled Dot-Product Attention}
-\newcommand*{\ThesisTitlePlaintext}{Mixed-Precision Randomized Sketching for Scaled Dot-Product Attention}
+\newcommand*{\ThesisTitle}{Precision Placement in Scaled Dot-Product Attention}
+\newcommand*{\ThesisTitlePlaintext}{Precision Placement in Scaled Dot-Product Attention}
 \newcommand*{\ThesisTitleFront}{\ThesisTitle}
 
 %% Author
@@ -27,18 +27,18 @@
 
 %% Abstract
 \newcommand*{\Abstract}{%
-    We propose a mathematically focused study of scaled dot-product attention under two simultaneous approximations: randomized feature sketching and mixed-precision arithmetic. The exact logit operator $d^{-1/2}QK^T$ is replaced by the sketched operator $d^{-1/2}QSS^TK^T$, where $S$ is a random sketching matrix of smaller column dimension. The report isolates three levels of perturbation: the deterministic error in the logits, the induced perturbation of the rowwise softmax map, and the additional finite-precision error introduced when the sketched computation is carried out in low precision. The main analytical result is a clean error decomposition showing that the total output error is controlled by the sum of a sketching term and a rounding term. The accompanying experiments are designed as a validation of this decomposition rather than as a large-scale engineering benchmark.
+    We study scaled dot-product attention as a precision-placement problem. Rather than asking whether one global low-precision dtype is acceptable, we ask which individual stages of the forward pass can safely run in low precision: storage of the query, key, and value tensors, the logit product $QK^T$, logit storage, the rowwise softmax, and the final value product. The present draft still analyzes an analytically transparent sketch-based baseline, but its main purpose is to motivate a broader decomposition of attention error into logit perturbation, softmax perturbation, and final output perturbation. The accompanying code now includes exact-attention precision sweeps with policy-level controls and diagnostics for relative logit error, rowwise softmax error, and output error.
 }
 
 %% Subject (short description for PDF metadata)
 \newcommand*{\Subject}{%
-    Mixed precision and randomized sketching for transformer attention.
+    Precision placement and numerical stability in transformer attention.
 }
 
 %% Keywords (about 3-7)
 \newcommand*{\Keywords}{%
-    mixed-precision arithmetic, randomized numerical linear algebra, attention, transformers, sketching
+    mixed-precision arithmetic, attention, transformers, numerical stability, floating-point arithmetic
 }
 \newcommand*{\KeywordsPlaintext}{%
-    mixed-precision arithmetic, randomized numerical linear algebra, attention, transformers, sketching
+    mixed-precision arithmetic, attention, transformers, numerical stability, floating-point arithmetic
 }
