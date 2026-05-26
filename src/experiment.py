@@ -2,34 +2,37 @@ from __future__ import annotations
 
 import csv
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import torch
 
-from attention import PrecisionConfig, attention_components, default_precisions, gaussian_sketch
+from attention import PrecisionConfig, attention_components, default_precision_policies
 
 
 @dataclass(frozen=True)
 class AttentionCase:
     label: str
     precision: PrecisionConfig
-    sketch_dim: int | None = None
 
 
 @dataclass(frozen=True)
 class ExperimentResult:
     n: int
     d: int
-    s: int | None
     seed: int
     case: str
-    sketch_err_logits_hs: float
-    sketch_err_output_hs: float
-    fp_err_logits_hs: float
-    fp_err_output_hs: float
-    total_err_logits_hs: float
-    total_err_output_hs: float
+    storage_dtype: str
+    qk_accum_dtype: str
+    logits_dtype: str
+    softmax_dtype: str
+    pv_accum_dtype: str
+    output_dtype: str
+    rel_err_logits_hs: float
+    row_err_probs_l1_mean: float
+    rel_err_output_hs: float
+    row_err_logits_linf_mean: float
+    softmax_amp_ratio: float
     ref_logits_hs: float
     ref_output_hs: float
     runtime_ms: float
@@ -43,18 +46,11 @@ def choose_device(device_name: str) -> torch.device:
     return torch.device(device_name)
 
 
-def build_cases(sketch_dims: list[int]) -> list[AttentionCase]:
-    cases = []
-    for precision in default_precisions():
-        for sketch_dim in sketch_dims:
-            cases.append(
-                AttentionCase(
-                    label=f"{precision.label}_sk{sketch_dim}",
-                    precision=precision,
-                    sketch_dim=sketch_dim,
-                )
-            )
-    return cases
+def build_cases() -> list[AttentionCase]:
+    return [
+        AttentionCase(label=precision.label, precision=precision)
+        for precision in default_precision_policies()
+    ]
 
 
 def _generator_for(device: torch.device, seed: int) -> torch.Generator:
@@ -63,6 +59,25 @@ def _generator_for(device: torch.device, seed: int) -> torch.Generator:
 
 def _hs_norm(x: torch.Tensor) -> float:
     return torch.linalg.norm(x.to(torch.float64)).item()
+
+
+def _mean_row_l1(x: torch.Tensor) -> float:
+    return x.to(torch.float64).abs().sum(dim=-1).mean().item()
+
+
+def _mean_row_linf(x: torch.Tensor) -> float:
+    return x.to(torch.float64).abs().amax(dim=-1).mean().item()
+
+
+def _rel_hs_error(reference: torch.Tensor, approx: torch.Tensor) -> float:
+    denom = _hs_norm(reference)
+    if denom == 0.0:
+        return 0.0
+    return _hs_norm(reference - approx) / denom
+
+
+def _dtype_name(dtype: torch.dtype) -> str:
+    return str(dtype).removeprefix("torch.")
 
 
 def _synchronize(device: torch.device) -> None:
@@ -75,54 +90,50 @@ def _run_case(
     k: torch.Tensor,
     v: torch.Tensor,
     reference_logits: torch.Tensor,
+    reference_weights: torch.Tensor,
     reference_output: torch.Tensor,
-    sketched_logits: torch.Tensor | None,
-    sketched_output: torch.Tensor | None,
     *,
     case: AttentionCase,
-    sketch: torch.Tensor | None,
     seed: int,
     device: torch.device,
 ) -> ExperimentResult:
     _synchronize(device)
     start = time.perf_counter()
-    logits, _, output = attention_components(
+    logits, weights, output = attention_components(
         q,
         k,
         v,
         precision=case.precision,
-        sketch=sketch,
     )
     _synchronize(device)
     runtime_ms = (time.perf_counter() - start) * 1000.0
 
-    sketch_err_logits = 0.0
-    sketch_err_output = 0.0
-    if sketched_logits is not None and sketched_output is not None:
-        sketch_err_logits = _hs_norm(reference_logits - sketched_logits)
-        sketch_err_output = _hs_norm(reference_output - sketched_output)
+    rel_err_logits = _rel_hs_error(reference_logits, logits)
+    rel_err_output = _rel_hs_error(reference_output, output)
+    row_err_probs = _mean_row_l1(reference_weights - weights)
+    row_err_logits = _mean_row_linf(reference_logits - logits)
+    softmax_amp_ratio = row_err_probs / row_err_logits if row_err_logits > 0.0 else 0.0
 
-    fp_err_logits = 0.0
-    fp_err_output = 0.0
-    if sketched_logits is not None and sketched_output is not None:
-        fp_err_logits = _hs_norm(sketched_logits - logits)
-        fp_err_output = _hs_norm(sketched_output - output)
-
-    total_err_logits = _hs_norm(reference_logits - logits)
-    total_err_output = _hs_norm(reference_output - output)
+    logits_dtype = case.precision.logits_dtype or case.precision.accumulation_dtype
+    pv_accum_dtype = case.precision.pv_accumulation_dtype or case.precision.accumulation_dtype
+    output_dtype = case.precision.output_dtype or pv_accum_dtype
 
     return ExperimentResult(
         n=q.shape[0],
         d=q.shape[1],
-        s=case.sketch_dim,
         seed=seed,
         case=case.label,
-        sketch_err_logits_hs=sketch_err_logits,
-        sketch_err_output_hs=sketch_err_output,
-        fp_err_logits_hs=fp_err_logits,
-        fp_err_output_hs=fp_err_output,
-        total_err_logits_hs=total_err_logits,
-        total_err_output_hs=total_err_output,
+        storage_dtype=_dtype_name(case.precision.storage_dtype),
+        qk_accum_dtype=_dtype_name(case.precision.accumulation_dtype),
+        logits_dtype=_dtype_name(logits_dtype),
+        softmax_dtype=_dtype_name(case.precision.softmax_dtype),
+        pv_accum_dtype=_dtype_name(pv_accum_dtype),
+        output_dtype=_dtype_name(output_dtype),
+        rel_err_logits_hs=rel_err_logits,
+        row_err_probs_l1_mean=row_err_probs,
+        rel_err_output_hs=rel_err_output,
+        row_err_logits_linf_mean=row_err_logits,
+        softmax_amp_ratio=softmax_amp_ratio,
         ref_logits_hs=_hs_norm(reference_logits),
         ref_output_hs=_hs_norm(reference_output),
         runtime_ms=runtime_ms,
@@ -135,12 +146,8 @@ def run_single_experiment(
     *,
     seed: int,
     device: torch.device,
-    sketch_dims: list[int],
 ) -> list[ExperimentResult]:
-    data_seed = seed
-    sketch_seed = 10_000 + 97 * seed
-
-    gen = _generator_for(device, data_seed)
+    gen = _generator_for(device, seed)
     q = torch.randn(n, d, dtype=torch.float64, device=device, generator=gen)
     k = torch.randn(n, d, dtype=torch.float64, device=device, generator=gen)
     v = torch.randn(n, d, dtype=torch.float64, device=device, generator=gen)
@@ -151,35 +158,21 @@ def run_single_experiment(
         accumulation_dtype=torch.float64,
         softmax_dtype=torch.float64,
     )
-    reference_logits, _, reference_output = attention_components(
+    reference_logits, reference_weights, reference_output = attention_components(
         q, k, v, precision=fp64,
     )
 
-    sketch_cache: dict[int, torch.Tensor] = {}
-    sketched_logits_cache: dict[int, torch.Tensor] = {}
-    sketched_output_cache: dict[int, torch.Tensor] = {}
-    for s in sketch_dims:
-        sketch = gaussian_sketch(
-            d, s, device=device, generator=_generator_for(device, sketch_seed + s),
-        )
-        sl, _, so = attention_components(q, k, v, precision=fp64, sketch=sketch)
-        sketch_cache[s] = sketch
-        sketched_logits_cache[s] = sl
-        sketched_output_cache[s] = so
-
     results = []
-    for case in build_cases(sketch_dims):
-        s = case.sketch_dim
-        sketched_l = sketched_logits_cache.get(s)
-        sketched_o = sketched_output_cache.get(s)
-        sketch = sketch_cache.get(s)
+    for case in build_cases():
         results.append(
             _run_case(
-                q, k, v,
-                reference_logits, reference_output,
-                sketched_l, sketched_o,
+                q,
+                k,
+                v,
+                reference_logits,
+                reference_weights,
+                reference_output,
                 case=case,
-                sketch=sketch,
                 seed=seed,
                 device=device,
             )
@@ -191,7 +184,6 @@ def run_single_experiment(
 def run_sweep(
     ns: list[int],
     ds: list[int],
-    sketch_dims: list[int],
     seeds: list[int],
     *,
     device: torch.device,
@@ -202,7 +194,7 @@ def run_sweep(
             for seed in seeds:
                 results.extend(
                     run_single_experiment(
-                        n, d, seed=seed, device=device, sketch_dims=sketch_dims,
+                        n, d, seed=seed, device=device,
                     )
                 )
     return results
@@ -219,13 +211,13 @@ def write_results(results: list[ExperimentResult], output_path: Path) -> None:
 
 def summarize_results(results: list[ExperimentResult]) -> str:
     lines = [
-        "case, n, d, s, E_sk, E_fp, E_tot, ref, ms",
+        "case, n, d, E_L, E_P, E_A, rho_softmax, ms",
     ]
     for r in results:
         lines.append(
-            f"{r.case}, {r.n}, {r.d}, {r.s}, "
-            f"{r.sketch_err_logits_hs:.4e}, {r.fp_err_logits_hs:.4e}, "
-            f"{r.total_err_logits_hs:.4e}, {r.ref_logits_hs:.4e}, "
+            f"{r.case}, {r.n}, {r.d}, "
+            f"{r.rel_err_logits_hs:.4e}, {r.row_err_probs_l1_mean:.4e}, "
+            f"{r.rel_err_output_hs:.4e}, {r.softmax_amp_ratio:.4e}, "
             f"{r.runtime_ms:.2f}"
         )
     return "\n".join(lines)

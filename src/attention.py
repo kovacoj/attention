@@ -22,6 +22,9 @@ class PrecisionConfig:
     storage_dtype: torch.dtype
     accumulation_dtype: torch.dtype
     softmax_dtype: torch.dtype
+    logits_dtype: torch.dtype | None = None
+    pv_accumulation_dtype: torch.dtype | None = None
+    output_dtype: torch.dtype | None = None
 
 
 def dtype_from_name(name: str) -> torch.dtype:
@@ -66,6 +69,9 @@ def attention_components(
     """
 
     d_model = q.shape[-1]
+    logits_dtype = precision.logits_dtype or precision.accumulation_dtype
+    pv_accumulation_dtype = precision.pv_accumulation_dtype or precision.accumulation_dtype
+    output_dtype = precision.output_dtype or pv_accumulation_dtype
 
     q_storage = q.to(precision.storage_dtype)
     k_storage = k.to(precision.storage_dtype)
@@ -79,22 +85,28 @@ def attention_components(
     is_fp8_accum = precision.accumulation_dtype in (
         torch.float8_e4m3fn, torch.float8_e5m2,
     )
-    compute_dtype = torch.float32 if is_fp8_accum else precision.accumulation_dtype
+    qk_compute_dtype = torch.float32 if is_fp8_accum else precision.accumulation_dtype
 
-    q_compute = q_storage.to(compute_dtype)
-    k_compute = k_storage.to(compute_dtype)
-    v_compute = v_storage.to(compute_dtype)
+    is_fp8_pv_accum = pv_accumulation_dtype in (
+        torch.float8_e4m3fn, torch.float8_e5m2,
+    )
+    pv_compute_dtype = torch.float32 if is_fp8_pv_accum else pv_accumulation_dtype
+
+    q_compute = q_storage.to(qk_compute_dtype)
+    k_compute = k_storage.to(qk_compute_dtype)
+    v_compute = v_storage.to(pv_compute_dtype)
 
     logits = (q_compute @ k_compute.transpose(-1, -2)) / math.sqrt(d_model)
+    logits = logits.to(logits_dtype)
     softmax_dtype = precision.softmax_dtype
     if softmax_dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
         softmax_dtype = torch.float32
     weights = torch.softmax(logits.to(softmax_dtype), dim=-1)
-    output = weights.to(compute_dtype) @ v_compute
+    output = (weights.to(pv_compute_dtype) @ v_compute).to(output_dtype)
     return logits, weights, output
 
 
-def default_precisions() -> list[PrecisionConfig]:
+def default_sketch_precisions() -> list[PrecisionConfig]:
     return [
         PrecisionConfig(
             label="full_fp32",
@@ -119,5 +131,95 @@ def default_precisions() -> list[PrecisionConfig]:
             storage_dtype=torch.float8_e4m3fn,
             accumulation_dtype=torch.float32,
             softmax_dtype=torch.float32,
+        ),
+    ]
+
+
+def default_precisions() -> list[PrecisionConfig]:
+    return default_sketch_precisions()
+
+
+def default_precision_policies() -> list[PrecisionConfig]:
+    return [
+        PrecisionConfig(
+            label="fp32_reference",
+            storage_dtype=torch.float32,
+            accumulation_dtype=torch.float32,
+            logits_dtype=torch.float32,
+            softmax_dtype=torch.float32,
+            pv_accumulation_dtype=torch.float32,
+            output_dtype=torch.float32,
+        ),
+        PrecisionConfig(
+            label="bf16_safe",
+            storage_dtype=torch.bfloat16,
+            accumulation_dtype=torch.float32,
+            logits_dtype=torch.float32,
+            softmax_dtype=torch.float32,
+            pv_accumulation_dtype=torch.float32,
+            output_dtype=torch.float32,
+        ),
+        PrecisionConfig(
+            label="fp16_safe",
+            storage_dtype=torch.float16,
+            accumulation_dtype=torch.float32,
+            logits_dtype=torch.float32,
+            softmax_dtype=torch.float32,
+            pv_accumulation_dtype=torch.float32,
+            output_dtype=torch.float32,
+        ),
+        PrecisionConfig(
+            label="bf16_low_logit",
+            storage_dtype=torch.bfloat16,
+            accumulation_dtype=torch.float32,
+            logits_dtype=torch.bfloat16,
+            softmax_dtype=torch.float32,
+            pv_accumulation_dtype=torch.float32,
+            output_dtype=torch.float32,
+        ),
+        PrecisionConfig(
+            label="fp16_low_logit",
+            storage_dtype=torch.float16,
+            accumulation_dtype=torch.float32,
+            logits_dtype=torch.float16,
+            softmax_dtype=torch.float32,
+            pv_accumulation_dtype=torch.float32,
+            output_dtype=torch.float32,
+        ),
+        PrecisionConfig(
+            label="bf16_low_softmax",
+            storage_dtype=torch.bfloat16,
+            accumulation_dtype=torch.float32,
+            logits_dtype=torch.bfloat16,
+            softmax_dtype=torch.bfloat16,
+            pv_accumulation_dtype=torch.float32,
+            output_dtype=torch.float32,
+        ),
+        PrecisionConfig(
+            label="fp16_low_softmax",
+            storage_dtype=torch.float16,
+            accumulation_dtype=torch.float32,
+            logits_dtype=torch.float16,
+            softmax_dtype=torch.float16,
+            pv_accumulation_dtype=torch.float32,
+            output_dtype=torch.float32,
+        ),
+        PrecisionConfig(
+            label="bf16_low_value",
+            storage_dtype=torch.bfloat16,
+            accumulation_dtype=torch.float32,
+            logits_dtype=torch.float32,
+            softmax_dtype=torch.float32,
+            pv_accumulation_dtype=torch.bfloat16,
+            output_dtype=torch.bfloat16,
+        ),
+        PrecisionConfig(
+            label="fp16_low_value",
+            storage_dtype=torch.float16,
+            accumulation_dtype=torch.float32,
+            logits_dtype=torch.float32,
+            softmax_dtype=torch.float32,
+            pv_accumulation_dtype=torch.float16,
+            output_dtype=torch.float16,
         ),
     ]
