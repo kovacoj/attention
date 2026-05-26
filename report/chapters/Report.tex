@@ -134,13 +134,13 @@ where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)
     \[
         \|\widetilde{\mathcal{L}}_S(Q,K) - \widehat{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
         \leq
-        \frac{\gamma_s\,\|QS\|_2\,\|KS\|_2\,\sqrt{n}}{\sqrt{d}}.
+        \frac{\gamma_s\,\|QS\|_{\mathrm{HS}}\,\|KS\|_{\mathrm{HS}}}{\sqrt{d}}.
     \]
     Consequently,
     \[
         \|\widetilde{\mathcal{A}}_S(Q,K,V) - \widehat{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
         \leq
-        \frac{\gamma_s\,\|QS\|_2\,\|KS\|_2\,\sqrt{n}\,\|V\|_2}{\sqrt{d}}.
+        \frac{\gamma_s\,\|QS\|_{\mathrm{HS}}\,\|KS\|_{\mathrm{HS}}\,\|V\|_2}{\sqrt{d}}.
     \]
 \end{proposition}
 
@@ -149,13 +149,13 @@ where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)
     \[
         |\widehat{AB}^* - AB^*| \leq \gamma_s\, |A|\,|B^*|,
     \]
-    entrywise in absolute value. Taking the Frobenius (Hilbert--Schmidt) norm,
+    entrywise in absolute value. Taking the Frobenius (Hilbert--Schmidt) norm and applying the Cauchy--Schwarz inequality for matrices,
     \[
         \|\widehat{AB}^* - AB^*\|_{\mathrm{HS}}
         \leq \gamma_s\, \||A|\,|B^*|\|_{\mathrm{HS}}
-        \leq \gamma_s\, \|A\|_2\, \|B\|_2\, \sqrt{n},
+        \leq \gamma_s\, \|A\|_{\mathrm{HS}}\,\|B\|_{\mathrm{HS}}.
     \]
-    where the last step uses $\||A|\,|B^T|\|_{\mathrm{HS}} \leq \|A\|_2\,\|B\|_2\,\sqrt{n}$ (each row of $|A|$ has norm at most $\|A\|_2$, and similarly for $|B^T|$). Multiplying by $d^{-1/2}$ yields the logit bound. The attention-output bound follows from Proposition~1.
+    Multiplying by $d^{-1/2}$ yields the logit bound. The attention-output bound follows from Proposition~1.
 \end{proof}
 
 \begin{remark}[Scope of the finite-precision bound]
@@ -163,7 +163,6 @@ where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)
 \end{remark}
 
 The factor $\gamma_s$ scales linearly with $s$: sketching reduces the finite-precision error by a factor of $s/d$ compared to the unsketched product. This is the formal statement of the intuition that ``compressing first makes low precision safer.''
-
 Combining the probabilistic subspace embedding guarantee with the finite-precision error analysis yields the main result.
 
 \begin{theorem}[Mixed-precision sketched attention]
@@ -176,11 +175,11 @@ Combining the probabilistic subspace embedding guarantee with the finite-precisi
         \Bigl(
             \varepsilon\, \|Q\|_{\mathrm{HS}}\,\|K\|_2
             +
-            \gamma_s\, \|QS\|_2\,\|KS\|_2\,\sqrt{n}
+            \gamma_s\, \|QS\|_{\mathrm{HS}}\,\|KS\|_{\mathrm{HS}}
         \Bigr)
         \|V\|_2.
     \]
-    The first term is the sketching error; the second is the finite-precision error. The finite-precision term is lower order whenever $s \cdot u \ll \varepsilon$.
+    The first term is the sketching error; the second is the finite-precision error. The condition $s \cdot u \ll \varepsilon$ is the leading-order requirement for the finite-precision term to remain lower order, assuming the norm factors are of comparable scale.
 \end{theorem}
 
 \begin{proof}
@@ -190,7 +189,7 @@ Combining the probabilistic subspace embedding guarantee with the finite-precisi
         \leq
         \bigl(\|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}} + \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}\bigr)\,\|V\|_2.
     \]
-    Apply Proposition~\ref{prop:deterministic} to the first term and Proposition~\ref{prop:rounding} to the second. For the lower-order claim, observe that $\gamma_s = O(s \cdot u)$ and $\|QS\|_2, \|KS\|_2 = O(\sqrt{\|Q\|_2\,\|K\|_2})$, so the finite-precision term is $O(s \cdot u \cdot \sqrt{n}\,\|Q\|_2\,\|K\|_2/\sqrt{d})$ while the sketching term is $\Theta(\varepsilon\,\|Q\|_{\mathrm{HS}}\,\|K\|_2/\sqrt{d})$. The condition $s \cdot u \ll \varepsilon$ ensures the finite-precision term is dominated.
+    Apply Proposition~\ref{prop:deterministic} to the first term and Proposition~\ref{prop:rounding} to the second. For the lower-order claim, observe that $\gamma_s = O(s \cdot u)$ and $\|QS\|_{\mathrm{HS}}, \|KS\|_{\mathrm{HS}} = O(\sqrt{\|Q\|_2\,\|K\|_2})$, so the finite-precision term is $O(s \cdot u \cdot \|Q\|_2\,\|K\|_2/\sqrt{d})$ while the sketching term is $\Theta(\varepsilon\,\|Q\|_{\mathrm{HS}}\,\|K\|_2/\sqrt{d})$. When the norm factors are of comparable scale, the condition $s \cdot u \ll \varepsilon$ ensures the finite-precision term is dominated.
 \end{proof}
 
 \begin{remark}[Design rule]
