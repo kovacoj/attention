@@ -1,7 +1,7 @@
 [project]
 name = "hvle"
 version = "0.1.0"
-description = "Experiments for mixed-precision randomized attention"
+description = "Experiments for precision placement in attention"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

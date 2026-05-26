@@ -1,6 +1,6 @@
 # Precision Placement in Attention
 
-Small research repo for a term paper on finite-precision effects in transformer attention.
+Small research repo for a term paper on precision placement, approximation, and finite-precision effects in transformer attention.
 
 The main direction is now exact scaled dot-product attention under explicit precision policies. The older sketching and random-feature experiments remain in the repo as comparison baselines.
 
@@ -14,10 +14,15 @@ uv run python -m src
 
 # Exact-attention precision policies
 uv run python -m src --experiment precision-placement --output results/precision_policy_sweep.csv
+uv run python -m src --experiment precision-placement --data-source transformer --transformer-model sshleifer/tiny-distilbert-base-cased --transformer-layer 0 --transformer-head 0 --output results/precision_policy_transformer.csv
+
+# Optional: the same exact-attention sweep through the JAX scaffold
+uv run python -m src --experiment precision-placement --backend jax --output results/precision_policy_sweep.jax.csv
 
 # Attention-only residual stack with configurable residual scale h
 uv run python -m src --experiment residual-stack --depths 4,8,16 --terminal-time 1.0
 uv run python -m src --experiment residual-stack --depths 8 --residual-scale 0.125
+uv run python -m src --experiment residual-stack --data-source transformer --depths 2,4 --transformer-model sshleifer/tiny-distilbert-base-cased --transformer-layer 0 --transformer-head 0
 
 # Sketching baseline
 uv run python -m src --experiment sketch --output results/attention_sweep.csv
@@ -42,3 +47,12 @@ make report
 `make report` builds the PDF through the repo's Docker/TeX setup.
 
 The report source lives in `report/`, experiment code in `src/`, and committed CSV outputs in `results/`.
+
+Current experiment tracks:
+
+- `precision-placement`: exact attention with explicit storage / accumulation / logit / softmax / value policies.
+- `residual-stack`: repeated self-attention residual steps for simple depth-propagation experiments.
+- `sketch`: the older sketch-based baseline retained for comparison.
+- `random-features`: Performer-style approximation experiments.
+
+JAX is currently an optional backend scaffold rather than a required dependency. The main verified sweeps in this repo run in PyTorch, while `--backend jax` is intended as the next experiment path once JAX is installed locally.
