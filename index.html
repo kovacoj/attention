@@ -3,105 +3,184 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Mixed-Precision Randomized Sketching for Scaled Dot-Product Attention</title>
+  <title>Precision Placement in Attention</title>
   <style>
     :root {
       color-scheme: light dark;
-      --bg: #f8f8fb;
-      --fg: #1b1d22;
-      --muted: #5a6170;
-      --card: #ffffff;
-      --accent: #3a63ff;
-      --border: #d9dfeb;
+      --bg: #0c1020;
+      --panel: #121933;
+      --panel-2: #0f152b;
+      --fg: #eef3ff;
+      --muted: #aab7d4;
+      --accent: #9ad1ff;
+      --border: rgba(154, 209, 255, 0.18);
+      --code: rgba(154, 209, 255, 0.12);
+      --link: #8ed0ff;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
     }
-    @media (prefers-color-scheme: dark) {
+    @media (prefers-color-scheme: light) {
       :root {
-        --bg: #0f1117;
-        --fg: #eef2ff;
-        --muted: #a6afc3;
-        --card: #171a23;
-        --accent: #8dadff;
-        --border: #2a3143;
+        --bg: #f5f8ff;
+        --panel: #ffffff;
+        --panel-2: #f1f5ff;
+        --fg: #14203a;
+        --muted: #51617f;
+        --accent: #1e5eff;
+        --border: rgba(30, 94, 255, 0.14);
+        --code: rgba(30, 94, 255, 0.08);
+        --link: #1e5eff;
+        --shadow: 0 24px 60px rgba(30, 94, 255, 0.08);
       }
     }
+    * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
+      background: radial-gradient(circle at top, var(--panel-2), var(--bg) 55%);
       color: var(--fg);
     }
     main {
-      max-width: 1080px;
+      max-width: 980px;
       margin: 0 auto;
-      padding: 2rem 1.25rem 3rem;
+      padding: 2rem 1.25rem 4rem;
+    }
+    .hero, .content {
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
     }
     .hero {
-      margin-bottom: 1.5rem;
       padding: 1.5rem;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 18px;
+      margin-bottom: 1.25rem;
     }
-    h1 {
+    .hero h1 {
       margin: 0 0 0.5rem;
-      font-size: clamp(1.8rem, 4vw, 2.7rem);
-      line-height: 1.05;
+      font-size: clamp(2rem, 5vw, 3.25rem);
+      line-height: 1.02;
     }
-    p {
-      margin: 0.35rem 0;
-      line-height: 1.6;
-    }
-    .meta {
+    .hero p {
+      margin: 0.4rem 0;
       color: var(--muted);
+      max-width: 60rem;
     }
     .actions {
-      margin-top: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1.25rem;
     }
     .actions a {
-      display: inline-block;
-      margin-right: 0.75rem;
-      padding: 0.7rem 1rem;
+      padding: 0.8rem 1.1rem;
       border-radius: 999px;
       border: 1px solid var(--border);
-      color: var(--fg);
       text-decoration: none;
-      font-weight: 600;
+      font-weight: 700;
+      color: var(--fg);
+      background: transparent;
     }
     .actions a.primary {
       background: var(--accent);
       border-color: var(--accent);
       color: white;
     }
-    .viewer {
-      overflow: hidden;
-      min-height: 80vh;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 18px;
+    .content {
+      padding: 1.5rem;
     }
-    iframe {
-      width: 100%;
-      height: 80vh;
-      border: 0;
-      background: white;
+    h1, h2, h3 {
+      letter-spacing: -0.03em;
+    }
+    h2 {
+      margin-top: 1.75rem;
+      margin-bottom: 0.5rem;
+      font-size: 1.35rem;
+    }
+    h3 {
+      margin-top: 1.2rem;
+      margin-bottom: 0.35rem;
+      font-size: 1.05rem;
+    }
+    p, li {
+      line-height: 1.7;
+      color: var(--fg);
+    }
+    ul {
+      padding-left: 1.25rem;
+    }
+    pre {
+      margin: 1rem 0;
+      padding: 1rem;
+      overflow-x: auto;
+      border-radius: 16px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+    }
+    code {
+      font-family: "SFMono-Regular", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--code);
+      border-radius: 6px;
+      padding: 0.12rem 0.3rem;
+    }
+    pre code {
+      padding: 0;
+      background: transparent;
+    }
+    a {
+      color: var(--link);
     }
   </style>
 </head>
 <body>
   <main>
     <section class="hero">
-      <h1>Mixed-Precision Randomized Sketching for Scaled Dot-Product Attention</h1>
-      <p class="meta">Ján Kovačovský · Term paper draft · Mathematical Foundations of Machine Learning</p>
-      <p>
-        This page publishes the current compiled PDF of the report directly from GitHub Actions.
-      </p>
+      <h1>Precision Placement in Attention</h1>
+      <p>Repository landing page built from <code>README.md</code>, with the latest compiled report published alongside it.</p>
       <div class="actions">
-        <a class="primary" href="report.pdf">Open PDF</a>
+        <a class="primary" href="report.pdf">Open report PDF</a>
         <a href="report.pdf" download>Download PDF</a>
+        <a href="https://github.com/kovacoj/attention">View repository</a>
       </div>
     </section>
-    <section class="viewer">
-      <iframe src="report.pdf" title="Report PDF"></iframe>
+    <section class="content">
+<p>Small research repo for a term paper on precision placement, approximation, and finite-precision effects in transformer attention.</p>
+<p>The main direction is now exact scaled dot-product attention under explicit precision policies. The older sketching and random-feature experiments remain in the repo as comparison baselines.</p>
+<p>Install dependencies with <code>uv sync</code>.</p>
+<h2>Run Experiments</h2>
+<pre><code># Default: exact-attention precision-placement sweep
+uv run python -m src
+
+# Exact-attention precision policies
+uv run python -m src --experiment precision-placement --output results/precision_policy_sweep.csv
+uv run python -m src --experiment precision-placement --data-source transformer --transformer-model sshleifer/tiny-distilbert-base-cased --transformer-layer 0 --transformer-head 0 --output results/precision_policy_transformer.csv
+
+# Optional: the same exact-attention sweep through the JAX scaffold
+uv run python -m src --experiment precision-placement --backend jax --output results/precision_policy_sweep.jax.csv
+
+# Attention-only residual stack with configurable residual scale h
+uv run python -m src --experiment residual-stack --depths 4,8,16 --terminal-time 1.0
+uv run python -m src --experiment residual-stack --depths 8 --residual-scale 0.125
+uv run python -m src --experiment residual-stack --data-source transformer --depths 2,4 --transformer-model sshleifer/tiny-distilbert-base-cased --transformer-layer 0 --transformer-head 0
+
+# Sketching baseline
+uv run python -m src --experiment sketch --output results/attention_sweep.csv
+
+# Random-feature baseline
+uv run python -m src --experiment random-features --feature-dims 32,64,128
+uv run python -m src --experiment random-features --data-source low-rank --intrinsic-rank 8 --noise-std 1e-2
+uv run python -m src --experiment random-features --data-source transformer --sequence-lengths 64 --feature-dims 32,64 --transformer-model distilbert-base-uncased
+uv run python -m src --experiment random-features --data-source transformer --sequence-lengths 16 --feature-dims 8 --transformer-model sshleifer/tiny-distilbert-base-cased
+
+# Example: generate publication-quality plots using the bundled styles
+uv run python -m src --experiment random-features --feature-dims 32,64,128 --output results/random_feature_sweep.dev.csv
+uv run python -m src.plotting results/random_feature_sweep.dev.csv figures/rf_errors.pdf</code></pre>
+<h2>Build Report</h2>
+<pre><code>make report</code></pre>
+<p><code>make report</code> builds the PDF through the repo&#x27;s Docker/TeX setup.</p>
+<p>The report source lives in <code>report/</code>, experiment code in <code>src/</code>, and committed CSV outputs in <code>results/</code>.</p>
+<p>Current experiment tracks:</p>
+<ul><li><code>precision-placement</code>: exact attention with explicit storage / accumulation / logit / softmax / value policies.</li><li><code>residual-stack</code>: repeated self-attention residual steps for simple depth-propagation experiments.</li><li><code>sketch</code>: the older sketch-based baseline retained for comparison.</li><li><code>random-features</code>: Performer-style approximation experiments.</li></ul>
+<p>JAX is currently an optional backend scaffold rather than a required dependency. The main verified sweeps in this repo run in PyTorch, while <code>--backend jax</code> is intended as the next experiment path once JAX is installed locally.</p>
     </section>
   </main>
 </body>
