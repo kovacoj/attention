@@ -7,6 +7,9 @@ on:
   push:
     branches: [main]
     paths:
+      - "Dockerfile"
+      - "docker-compose.yaml"
+      - "Makefile"
       - "report/**"
       - "figures/**"
       - "README.md"
@@ -15,6 +18,9 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "Dockerfile"
+      - "docker-compose.yaml"
+      - "Makefile"
       - "report/**"
       - "figures/**"
       - "README.md"
@@ -37,13 +43,9 @@ jobs:
           lfs: true
 
       - name: Compile report PDF
-        uses: xu-cheng/latex-action@e2f99d4b3685b0da93f97e1b86ad8fab81105098 # v3
-        with:
-          working_directory: report
-          root_file: paper.tex
-          texlive_version: latest
-          extra_system_packages: coreutils icu inkscape ghostscript perl sed findutils
-          pre_compile: tlmgr install keytheorems
+        run: |
+          docker compose -f docker-compose.yaml build latex
+          docker compose -f docker-compose.yaml run --rm latex latexmk -g paper.tex
 
       - name: Upload PDF artifact
         uses: actions/upload-artifact@v4
@@ -59,6 +61,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Download PDF artifact
         uses: actions/download-artifact@v4
         with:
