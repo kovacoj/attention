@@ -4,7 +4,7 @@ The purpose of this report is to study one analytically transparent component of
 
 These two approximation strategies are typically studied in isolation. This report asks what happens when they are composed: when the query-key logit computation is approximated by a randomized sketch, can the subsequent computation be carried out in mixed precision with only a lower-order loss of accuracy?
 
-The answer, as we show, is yes---and the mechanism is precise. Sketching reduces the effective dimension of the matrix product from $d$ to $s$, which simultaneously controls the sketching error (via the intrinsic rank of the query--key subspace) and shrinks the finite-precision error (because the inner dimension of the product is smaller). The main result (Theorem~\ref{thm:main}) gives an explicit total error bound and identifies the condition $s \cdot u \ll \varepsilon$ under which the finite-precision term is lower order, where $s$ is the sketch dimension, $u$ is the unit roundoff, and $\varepsilon$ is the sketch tolerance. This condition provides a concrete design rule: sketch dimension and precision should be chosen jointly, not independently.
+The answer, as we show, is yes---and the mechanism is precise. Sketching reduces the effective dimension of the matrix product from $d$ to $s$, which simultaneously controls the sketching error (via the intrinsic rank of the query--key subspace) and shrinks the finite-precision error (because the inner dimension of the product is smaller). The main result (Theorem~\ref{thm:main}) gives an explicit total error bound and highlights the condition $s \cdot u \ll \varepsilon$ as the leading-order requirement for the finite-precision term to remain lower order when the accompanying norm factors are of comparable scale, where $s$ is the sketch dimension, $u$ is the unit roundoff, and $\varepsilon$ is the sketch tolerance. This condition provides a concrete design rule: sketch dimension and precision should be chosen jointly, not independently.
 
 \section{Operator-Theoretic Setup}
 
@@ -179,7 +179,7 @@ Combining the probabilistic subspace embedding guarantee with the finite-precisi
         \Bigr)
         \|V\|_2.
     \]
-    The first term is the sketching error; the second is the finite-precision error. The condition $s \cdot u \ll \varepsilon$ is the leading-order requirement for the finite-precision term to remain lower order, assuming the norm factors are of comparable scale.
+    The first term is the sketching error; the second is the finite-precision error.
 \end{theorem}
 
 \begin{proof}
@@ -189,8 +189,16 @@ Combining the probabilistic subspace embedding guarantee with the finite-precisi
         \leq
         \bigl(\|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}} + \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}\bigr)\,\|V\|_2.
     \]
-    Apply Proposition~\ref{prop:deterministic} to the first term and Proposition~\ref{prop:rounding} to the second. For the lower-order claim, observe that $\gamma_s = O(s \cdot u)$ and $\|QS\|_{\mathrm{HS}}, \|KS\|_{\mathrm{HS}} = O(\sqrt{\|Q\|_2\,\|K\|_2})$, so the finite-precision term is $O(s \cdot u \cdot \|Q\|_2\,\|K\|_2/\sqrt{d})$ while the sketching term is $\Theta(\varepsilon\,\|Q\|_{\mathrm{HS}}\,\|K\|_2/\sqrt{d})$. When the norm factors are of comparable scale, the condition $s \cdot u \ll \varepsilon$ ensures the finite-precision term is dominated.
+    Apply Proposition~\ref{prop:deterministic} to the first term and Proposition~\ref{prop:rounding} to the second.
 \end{proof}
+
+\begin{remark}[Lower-order regime]
+    Theorem~\ref{thm:main} isolates the roundoff coefficient $\gamma_s = O(s \cdot u)$ explicitly. If, in addition, the norm factors satisfy a scale comparison such as
+    \[
+        \|QS\|_{\mathrm{HS}}\,\|KS\|_{\mathrm{HS}} = O\!\bigl(\|Q\|_{\mathrm{HS}}\,\|K\|_2\bigr),
+    \]
+    then $s \cdot u \ll \varepsilon$ is the leading-order requirement for the finite-precision term to remain lower order than the sketching term.
+\end{remark}
 
 \begin{remark}[Design rule]
     Theorem~\ref{thm:main} yields a concrete joint design rule. For float16 ($u_{16} \approx 5 \times 10^{-4}$) and typical sketch dimensions $s \leq 64$, we have $s \cdot u_{16} \leq 0.032$, which is smaller than typical sketch tolerances $\varepsilon \geq 0.1$. For float32 ($u_{32} \approx 6 \times 10^{-8}$), the condition is essentially always satisfied. For float8 E4M3 ($u_{\text{fp8}} \approx 0.0625$), even $s = 16$ gives $s \cdot u_{\text{fp8}} \approx 1.0$, which is comparable to $\varepsilon$---so the finite-precision term is no longer clearly lower order. The rule also reveals a regime to avoid: if $s$ is chosen too large relative to $1/u$, the finite-precision error can overtake the sketching error, defeating the purpose of mixed precision.
