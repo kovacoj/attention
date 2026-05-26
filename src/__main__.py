@@ -22,7 +22,11 @@ def main() -> None:
     parser.add_argument("--sketch-dims", default="8,16,24,32")
     parser.add_argument("--seeds", default="0,1,2")
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--output", default="results/attention_sweep.csv")
+    parser.add_argument(
+        "--output",
+        default="results/attention_sweep.dev.csv",
+        help="Scratch output path; pass results/attention_sweep.csv explicitly for the canonical full sweep.",
+    )
     args = parser.parse_args()
 
     device = choose_device(args.device)
