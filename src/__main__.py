@@ -120,8 +120,8 @@ def main() -> None:
         print()
         try:
             out_path = Path(output)
-            figures_dir = Path("figures")
-            figures_dir.mkdir(exist_ok=True)
+            figures_dir = Path("report/figures")
+            figures_dir.mkdir(exist_ok=True, parents=True)
             plot_path = figures_dir / f"rf_errors_{out_path.stem}.pdf"
             plot_rf_error_vs_m(out_path, plot_path)
             print(f"Wrote plot to {plot_path}")

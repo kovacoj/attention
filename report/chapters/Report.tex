@@ -409,7 +409,7 @@ Config & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{fp}}$ & $E_{\mathrm{tot}}$ & $E_{
 Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ is consistently large ($10^3$--$10^6$), confirming that the dominant error source is the randomized sketch. Second, \texttt{full\_fp16} and \texttt{mixed\_fp16} have finite-precision errors of the same order, consistent with Proposition~\ref{prop:rounding}: storage quantization dominates any benefit from higher-precision accumulation. Third, fp8 storage substantially increases the finite-precision error (from $\sim$0.3 to $\sim$30 in absolute terms), but the sketching error still dominates by a factor of $\sim$14--15. The results support the error decomposition and illustrate the degradation predicted by Theorem~\ref{thm:main} for increasing $s \cdot u$, but they do not demonstrate a high-quality efficient-attention approximation or a full inversion of the error ratio.
 
 % Include generated publication-quality figures before the Outlook section.
-\input{../figures/figures}
+\input{figures/figures}
 
 \section{Outlook}
 

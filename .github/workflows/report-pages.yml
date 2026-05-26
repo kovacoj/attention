@@ -11,9 +11,7 @@ on:
       - "docker-compose.yaml"
       - "Makefile"
       - "report/**"
-      - "figures/**"
       - "README.md"
-      - "scripts/**"
       - ".github/workflows/report-pages.yml"
   pull_request:
     branches: [main]
@@ -22,9 +20,7 @@ on:
       - "docker-compose.yaml"
       - "Makefile"
       - "report/**"
-      - "figures/**"
       - "README.md"
-      - "scripts/**"
       - ".github/workflows/report-pages.yml"
   workflow_dispatch:
 
@@ -78,7 +74,7 @@ jobs:
       - name: Update deploy branch
         run: |
           cp paper.pdf deploy-dir/report.pdf
-          python3 scripts/build_pages.py README.md deploy-dir/index.html
+          python3 report/build_pages.py README.md deploy-dir/index.html
           cd deploy-dir
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

@@ -1,11 +1,10 @@
 % Auto-generated include for figures produced by src/plotting.py
-% This file is read by report/chapters/Report.tex via \input{../figures/figures}
-% Paths inside this file are resolved with the report/ directory as the working directory,
-% so image files are referenced via ../figures/*.pdf (repository-root figures/).
+% This file is read by report/chapters/Report.tex via \input{figures/figures}
+% Paths are resolved via \graphicspath in report/preamble/general/floats.tex.
 
 \begin{figure}[ht]
 \centering
-\includegraphics[width=0.98\linewidth]{../figures/precision_policy_map.pdf}
+\includegraphics[width=0.98\linewidth]{precision_policy_map.pdf}
 \caption{Precision-placement map for exact attention. Rows correspond to explicit precision policies, columns to the principal diagnostics $E_L$, $E_P$, $E_A$, $\rho_{\mathrm{softmax}}$, and $E_{\mathrm{depth}}$. The Gaussian panel gives the synthetic baseline; the transformer panel uses a fixed head from a pretrained model. Safe policies with fp32 accumulation and fp32 softmax remain low-error, whereas low-precision softmax is the clearest failure mode through its sharp increase in $\rho_{\mathrm{softmax}}$.}
 \label{fig:precision-map}
 \end{figure}

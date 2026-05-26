@@ -35,7 +35,7 @@ uv run python -m src --experiment random-features --data-source transformer --se
 
 # Example: generate publication-quality plots using the bundled styles
 uv run python -m src --experiment random-features --feature-dims 32,64,128 --output results/random_feature_sweep.dev.csv
-uv run python -m src.plotting results/random_feature_sweep.dev.csv figures/rf_errors.pdf
+uv run python -m src.plotting results/random_feature_sweep.dev.csv report/figures/rf_errors.pdf
 ```
 
 ## Build Report
