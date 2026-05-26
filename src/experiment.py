@@ -81,6 +81,7 @@ def _run_case(
     *,
     case: AttentionCase,
     sketch: torch.Tensor | None,
+    seed: int,
     device: torch.device,
 ) -> ExperimentResult:
     _synchronize(device)
@@ -114,7 +115,7 @@ def _run_case(
         n=q.shape[0],
         d=q.shape[1],
         s=case.sketch_dim,
-        seed=0,
+        seed=seed,
         case=case.label,
         sketch_err_logits_hs=sketch_err_logits,
         sketch_err_output_hs=sketch_err_output,
@@ -179,12 +180,10 @@ def run_single_experiment(
                 sketched_l, sketched_o,
                 case=case,
                 sketch=sketch,
+                seed=seed,
                 device=device,
             )
         )
-
-    for r in results:
-        object.__setattr__(r, 'seed', seed)
 
     return results
 

@@ -61,13 +61,13 @@ The next proposition isolates the deterministic sketching error. Since attention
 
 \begin{proposition}[Deterministic sketching bound]
     \label{prop:deterministic}
-    Let $U \subseteq \mathcal{H}_d$ be a subspace containing all row vectors of $Q$ and $K$. Assume that $S$ is an $\varepsilon$-subspace embedding for $U$, meaning
+    Let $U \subseteq \mathcal{H}_d$ be the subspace spanned by the rows of $[Q^T \;\; K^T]$, and let $r := \dim U$. Assume that $S$ is an $\varepsilon$-subspace embedding for $U$, meaning
     \[
         \bigl|\langle S^*u, S^*v\rangle - \langle u, v\rangle\bigr| \leq \varepsilon\,\|u\|_2\,\|v\|_2
         \qquad
         \text{for all } u, v \in U.
     \]
-    Equivalently, the restriction of $SS^*$ to $U$ satisfies $\|SS^*|_U - I_U\|_2 \leq \varepsilon$. Then
+    Equivalently, if $U_0 \in \mathbb{R}^{d \times r}$ is any orthonormal basis matrix for $U$, then $\|U_0^T SS^* U_0 - I_r\|_2 \leq \varepsilon$. Then
     \[
         \|\mathcal{L}(Q,K)-\widetilde{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
         \leq
@@ -82,12 +82,18 @@ The next proposition isolates the deterministic sketching error. Since attention
 \end{proposition}
 
 \begin{proof}
-    Since $\mathcal{L}-\widetilde{\mathcal{L}}_S = d^{-1/2}\, Q(I - SS^*)K^*$,
+    Let $U_0 \in \mathbb{R}^{d \times r}$ have orthonormal columns spanning the joint row space of $Q$ and $K$. Write $Q = Q_U U_0^T$ and $K = K_U U_0^T$, where $Q_U = QU_0 \in \mathbb{R}^{n \times r}$ and $K_U = KU_0 \in \mathbb{R}^{n \times r}$. Then
     \[
-        \|\mathcal{L}-\widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}
-        \leq d^{-1/2}\,\|Q(I-SS^*)\|_{\mathrm{HS}}\,\|K\|_2.
+        QK^* - QSS^*K^*
+        = Q_U\bigl(I_r - U_0^T SS^* U_0\bigr)K_U^T.
     \]
-    The subspace-embedding condition $\|SS^*|_U - I_U\|_2 \leq \varepsilon$ implies $\|(I-SS^*)|_U\|_2 \leq \varepsilon$, so every row $q_i$ of $Q$ (which lies in $U$) satisfies $\|q_i^*(I-SS^*)\|_2 \leq \varepsilon\|q_i\|_2$. Therefore $\|Q(I-SS^*)\|_{\mathrm{HS}} \leq \varepsilon\|Q\|_{\mathrm{HS}}$, proving the first estimate. The second follows from Proposition~1.
+    The subspace-embedding condition is exactly $\|U_0^T SS^* U_0 - I_r\|_2 \leq \varepsilon$, so
+    \[
+        \|QK^* - QSS^*K^*\|_{\mathrm{HS}}
+        \leq \|Q_U\|_{\mathrm{HS}}\,\|I_r - U_0^T SS^* U_0\|_2\,\|K_U^T\|_2
+        \leq \varepsilon\,\|Q\|_{\mathrm{HS}}\,\|K\|_2,
+    \]
+    where we used $\|Q_U\|_{\mathrm{HS}} = \|Q\|_{\mathrm{HS}}$ and $\|K_U\|_2 = \|K\|_2$. Multiplying by $d^{-1/2}$ gives the logit bound. The attention-output bound follows from Proposition~1.
 \end{proof}
 
 The proposition should be read as a conditional stability statement: it separates the attention-stability argument from the probabilistic question of when the sketch approximately preserves inner products on the relevant subspace.
@@ -98,9 +104,9 @@ The next result gives this probabilistic guarantee for Gaussian sketches. A scal
     \label{prop:probabilistic}
     Let $U \subseteq \mathcal{H}_d$ be an $r$-dimensional subspace. Let $S \in \mathbb{R}^{d \times s}$ have i.i.d.\ entries $S_{ij} \sim \mathcal{N}(0, 1/s)$. For $\varepsilon \in (0, 1)$ and $\delta \in (0, 1)$, if
     \[
-        s \;\geq\; \frac{r + \ln(1/\delta)}{\varepsilon^2},
+        s \;\geq\; C\,\frac{r + \ln(1/\delta)}{\varepsilon^2},
     \]
-    then with probability at least $1 - \delta$, $S$ is an $\varepsilon$-subspace embedding for $U$. If $U$ contains the rows of $[Q^T \;\; K^T]$, then with the same probability,
+    for a universal constant $C$, then with probability at least $1 - \delta$, $S$ is an $\varepsilon$-subspace embedding for $U$. If $U$ contains the rows of $[Q^T \;\; K^T]$, then with the same probability,
     \[
         \|\mathcal{A}(Q,K,V)-\widetilde{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
         \leq
@@ -109,7 +115,7 @@ The next result gives this probabilistic guarantee for Gaussian sketches. A scal
 \end{proposition}
 
 \begin{proof}
-    Let $U \in \mathbb{R}^{d \times r}$ be a matrix whose columns form an orthonormal basis for $U$. Then $S$ is an $\varepsilon$-subspace embedding for $U$ if and only if $\|U^T SS^* U - I_r\|_2 \leq \varepsilon$. The matrix $U^T SS^* U = (S^* U)^*(S^* U)$ has the same distribution as $G^*G/s$ where $G \in \mathbb{R}^{s \times r}$ has i.i.d.\ standard normal entries. By the Johnson--Lindenstrauss lemma~\autocite{HalkoMartinssonTropp2011}, $\Pr(\|G^*G/s - I_r\|_2 > \varepsilon) \leq 2\exp(-s\varepsilon^2/4 + r)$ for $s \geq 4r/\varepsilon^2$. The stated condition $s \geq (r + \ln(1/\delta))/{\varepsilon^2}$ ensures the failure probability is at most $\delta$. The attention error bound follows from Proposition~\ref{prop:deterministic}.
+    Let $U_0 \in \mathbb{R}^{d \times r}$ be a matrix whose columns form an orthonormal basis for $U$. Then $S$ is an $\varepsilon$-subspace embedding for $U$ if and only if $\|U_0^T SS^* U_0 - I_r\|_2 \leq \varepsilon$. The matrix $U_0^T SS^* U_0 = (S^* U_0)^*(S^* U_0)$ has the same distribution as $G^*G/s$ where $G \in \mathbb{R}^{s \times r}$ has i.i.d.\ standard normal entries. Standard JL concentration~\autocite{HalkoMartinssonTropp2011} gives $\Pr(\|G^*G/s - I_r\|_2 > \varepsilon) \leq 2\exp(-c\,s\varepsilon^2 + r)$ for a universal constant $c > 0$, provided $s$ is large enough relative to $r/\varepsilon^2$. The stated condition with an appropriate $C$ ensures the failure probability is at most $\delta$. The attention error bound follows from Proposition~\ref{prop:deterministic}.
 \end{proof}
 
 The key feature is the dependence on $r$ rather than $d$: when the query--key rows lie near a low-dimensional subspace, a much smaller sketch suffices.
@@ -153,7 +159,7 @@ where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)
 \end{proof}
 
 \begin{remark}[Scope of the finite-precision bound]
-    The bound in Proposition~\ref{prop:rounding} models the error in the final sketched logit product $(QS)(KS)^*$, assuming that $QS$ and $KS$ are given exactly. The experiments measure a broader implementation error that also includes quantization of $Q$, $K$, $V$, and $S$ to the storage dtype before projection. Thus the measured $E_{\mathrm{fp}}$ is an upper bound on the multiplication-only error analyzed in the proposition.
+    The bound in Proposition~\ref{prop:rounding} models the error in the final sketched logit product $(QS)(KS)^*$, assuming that $QS$ and $KS$ are given exactly. The experiments measure a broader implementation error that also includes quantization of $Q$, $K$, $V$, and $S$ to the storage dtype before projection. Thus the measured $E_{\mathrm{fp}}$ is a broader implementation error than the multiplication-only term analyzed in the proposition.
 \end{remark}
 
 The factor $\gamma_s$ scales linearly with $s$: sketching reduces the finite-precision error by a factor of $s/d$ compared to the unsketched product. This is the formal statement of the intuition that ``compressing first makes low precision safer.''
@@ -178,7 +184,7 @@ Combining the probabilistic subspace embedding guarantee with the finite-precisi
 \end{theorem}
 
 \begin{proof}
-    By the error-splitting identity (Proposition~3),
+    By Proposition~1 and the triangle inequality,
     \[
         \|\mathcal{A} - \widehat{\mathcal{A}}_S\|_{\mathrm{HS}}
         \leq
@@ -188,7 +194,7 @@ Combining the probabilistic subspace embedding guarantee with the finite-precisi
 \end{proof}
 
 \begin{remark}[Design rule]
-    Theorem~\ref{thm:main} yields a concrete joint design rule. For float16 ($u_{16} \approx 5 \times 10^{-4}$) and typical sketch dimensions $s \leq 64$, we have $s \cdot u_{16} \leq 0.032$, which is comfortably smaller than typical sketch tolerances $\varepsilon \geq 0.1$. For float32 ($u_{32} \approx 6 \times 10^{-8}$), the condition is essentially always satisfied. For float8 E4M3 ($u_{\text{fp8}} \approx 0.0625$), even $s = 16$ gives $s \cdot u_{\text{fp8}} \approx 1.0$, which is comparable to $\varepsilon$---so the finite-precision term is no longer clearly lower order. The rule also reveals a regime to avoid: if $s$ is chosen too large relative to $1/u$, the finite-precision error can overtake the sketching error, defeating the purpose of mixed precision.
+    Theorem~\ref{thm:main} yields a concrete joint design rule. For float16 ($u_{16} \approx 5 \times 10^{-4}$) and typical sketch dimensions $s \leq 64$, we have $s \cdot u_{16} \leq 0.032$, which is smaller than typical sketch tolerances $\varepsilon \geq 0.1$. For float32 ($u_{32} \approx 6 \times 10^{-8}$), the condition is essentially always satisfied. For float8 E4M3 ($u_{\text{fp8}} \approx 0.0625$), even $s = 16$ gives $s \cdot u_{\text{fp8}} \approx 1.0$, which is comparable to $\varepsilon$---so the finite-precision term is no longer clearly lower order. The rule also reveals a regime to avoid: if $s$ is chosen too large relative to $1/u$, the finite-precision error can overtake the sketching error, defeating the purpose of mixed precision.
 \end{remark}
 
 \section{Numerical Experiments}
@@ -201,9 +207,9 @@ The experiments probe the decomposition of Theorem~\ref{thm:main} directly. For 
 \end{enumerate}
 The sketching error is $E_{\mathrm{sk}} := \|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$ and the finite-precision error is $E_{\mathrm{fp}} := \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$. The total error is $E_{\mathrm{tot}} := \|\mathcal{L} - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$. The same decomposition is recorded for the attention output. We test four precision configurations: \texttt{fp32} (all stages in float32), \texttt{full\_fp16} (all stages in float16), \texttt{mixed\_fp16} (storage in float16, accumulation and softmax in float32), and \texttt{fp8\_store} (storage in float8 E4M3, accumulation and softmax in float32).
 
-The sketch $S \in \mathbb{R}^{d \times s}$ is a scaled Gaussian matrix with i.i.d.\ $\mathcal{N}(0, 1/s)$ entries; the scaling is chosen so that $\mathbb{E}[SS^*] = I_d$. We sweep $n \in \{64, 128, 256\}$, $d \in \{32, 64\}$, $s \in \{8, 16, 24, 32\}$, and average over three seeds. Data and sketch seeds are independent.
+The sketch $S \in \mathbb{R}^{d \times s}$ is a scaled Gaussian matrix with i.i.d.\ $\mathcal{N}(0, 1/s)$ entries; the scaling is chosen so that $\mathbb{E}[SS^*] = I_d$. We sweep $n \in \{64, 128, 256\}$, $d \in \{32, 64\}$, $s \in \{8, 16, 24, 32\}$, and average over three seeds. Data and sketch seeds are independent. The full numerical results are available in the committed CSV file \texttt{results/attention\_sweep.csv}.
 
-Table~\ref{tab:results} reports absolute and relative HS errors of the logits for $n = 256$, $d = 64$; the output errors showed the same qualitative ordering and are omitted.
+Table~\ref{tab:results} reports absolute HS errors of the logits for $n = 256$, $d = 64$, together with the ratio $E_{\mathrm{sk}}/E_{\mathrm{fp}}$; the output errors showed the same qualitative ordering and are omitted.
 
 \begin{table}[ht]
 \centering
