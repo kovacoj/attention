@@ -37,7 +37,7 @@ jobs:
           lfs: true
 
       - name: Compile report PDF
-        uses: xu-cheng/latex-action@v4
+        uses: xu-cheng/latex-action@e2f99d4b3685b0da93f97e1b86ad8fab81105098 # v3
         with:
           working_directory: report
           root_file: paper.tex
