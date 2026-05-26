@@ -26,10 +26,12 @@ class ExperimentResult:
     case: str
     sketch_err_logits_hs: float
     sketch_err_output_hs: float
-    round_err_logits_hs: float
-    round_err_output_hs: float
+    fp_err_logits_hs: float
+    fp_err_output_hs: float
     total_err_logits_hs: float
     total_err_output_hs: float
+    ref_logits_hs: float
+    ref_output_hs: float
     runtime_ms: float
 
 
@@ -63,10 +65,6 @@ def _hs_norm(x: torch.Tensor) -> float:
     return torch.linalg.norm(x.to(torch.float64)).item()
 
 
-def _spectral_norm(x: torch.Tensor) -> float:
-    return torch.linalg.norm(x.to(torch.float64), ord=2).item()
-
-
 def _synchronize(device: torch.device) -> None:
     if device.type == "cuda":
         torch.cuda.synchronize(device)
@@ -82,18 +80,9 @@ def _run_case(
     sketched_output: torch.Tensor | None,
     *,
     case: AttentionCase,
-    sketch_seed: int,
+    sketch: torch.Tensor | None,
     device: torch.device,
 ) -> ExperimentResult:
-    sketch = None
-    if case.sketch_dim is not None:
-        sketch = gaussian_sketch(
-            q.shape[-1],
-            case.sketch_dim,
-            device=device,
-            generator=_generator_for(device, sketch_seed),
-        )
-
     _synchronize(device)
     start = time.perf_counter()
     logits, _, output = attention_components(
@@ -112,11 +101,11 @@ def _run_case(
         sketch_err_logits = _hs_norm(reference_logits - sketched_logits)
         sketch_err_output = _hs_norm(reference_output - sketched_output)
 
-    round_err_logits = 0.0
-    round_err_output = 0.0
+    fp_err_logits = 0.0
+    fp_err_output = 0.0
     if sketched_logits is not None and sketched_output is not None:
-        round_err_logits = _hs_norm(sketched_logits - logits)
-        round_err_output = _hs_norm(sketched_output - output)
+        fp_err_logits = _hs_norm(sketched_logits - logits)
+        fp_err_output = _hs_norm(sketched_output - output)
 
     total_err_logits = _hs_norm(reference_logits - logits)
     total_err_output = _hs_norm(reference_output - output)
@@ -125,14 +114,16 @@ def _run_case(
         n=q.shape[0],
         d=q.shape[1],
         s=case.sketch_dim,
-        seed=sketch_seed,
+        seed=0,
         case=case.label,
         sketch_err_logits_hs=sketch_err_logits,
         sketch_err_output_hs=sketch_err_output,
-        round_err_logits_hs=round_err_logits,
-        round_err_output_hs=round_err_output,
+        fp_err_logits_hs=fp_err_logits,
+        fp_err_output_hs=fp_err_output,
         total_err_logits_hs=total_err_logits,
         total_err_output_hs=total_err_output,
+        ref_logits_hs=_hs_norm(reference_logits),
+        ref_output_hs=_hs_norm(reference_output),
         runtime_ms=runtime_ms,
     )
 
@@ -145,7 +136,10 @@ def run_single_experiment(
     device: torch.device,
     sketch_dims: list[int],
 ) -> list[ExperimentResult]:
-    gen = _generator_for(device, seed)
+    data_seed = seed
+    sketch_seed = 10_000 + 97 * seed
+
+    gen = _generator_for(device, data_seed)
     q = torch.randn(n, d, dtype=torch.float64, device=device, generator=gen)
     k = torch.randn(n, d, dtype=torch.float64, device=device, generator=gen)
     v = torch.randn(n, d, dtype=torch.float64, device=device, generator=gen)
@@ -160,27 +154,38 @@ def run_single_experiment(
         q, k, v, precision=fp64,
     )
 
-    sketched_cache: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
+    sketch_cache: dict[int, torch.Tensor] = {}
+    sketched_logits_cache: dict[int, torch.Tensor] = {}
+    sketched_output_cache: dict[int, torch.Tensor] = {}
     for s in sketch_dims:
         sketch = gaussian_sketch(
-            d, s, device=device, generator=_generator_for(device, seed),
+            d, s, device=device, generator=_generator_for(device, sketch_seed + s),
         )
         sl, _, so = attention_components(q, k, v, precision=fp64, sketch=sketch)
-        sketched_cache[s] = (sl, so)
+        sketch_cache[s] = sketch
+        sketched_logits_cache[s] = sl
+        sketched_output_cache[s] = so
 
     results = []
     for case in build_cases(sketch_dims):
-        sketched_l, sketched_o = sketched_cache.get(case.sketch_dim, (None, None))
+        s = case.sketch_dim
+        sketched_l = sketched_logits_cache.get(s)
+        sketched_o = sketched_output_cache.get(s)
+        sketch = sketch_cache.get(s)
         results.append(
             _run_case(
                 q, k, v,
                 reference_logits, reference_output,
                 sketched_l, sketched_o,
                 case=case,
-                sketch_seed=seed,
+                sketch=sketch,
                 device=device,
             )
         )
+
+    for r in results:
+        object.__setattr__(r, 'seed', seed)
+
     return results
 
 
@@ -215,14 +220,13 @@ def write_results(results: list[ExperimentResult], output_path: Path) -> None:
 
 def summarize_results(results: list[ExperimentResult]) -> str:
     lines = [
-        "case, n, d, s, sketch_logits, sketch_output, round_logits, round_output, total_logits, total_output, ms",
+        "case, n, d, s, E_sk, E_fp, E_tot, ref, ms",
     ]
     for r in results:
         lines.append(
             f"{r.case}, {r.n}, {r.d}, {r.s}, "
-            f"{r.sketch_err_logits_hs:.4e}, {r.sketch_err_output_hs:.4e}, "
-            f"{r.round_err_logits_hs:.4e}, {r.round_err_output_hs:.4e}, "
-            f"{r.total_err_logits_hs:.4e}, {r.total_err_output_hs:.4e}, "
+            f"{r.sketch_err_logits_hs:.4e}, {r.fp_err_logits_hs:.4e}, "
+            f"{r.total_err_logits_hs:.4e}, {r.ref_logits_hs:.4e}, "
             f"{r.runtime_ms:.2f}"
         )
     return "\n".join(lines)

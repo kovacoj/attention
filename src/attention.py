@@ -115,13 +115,7 @@ def default_precisions() -> list[PrecisionConfig]:
             softmax_dtype=torch.float32,
         ),
         PrecisionConfig(
-            label="full_fp8_e4m3",
-            storage_dtype=torch.float8_e4m3fn,
-            accumulation_dtype=torch.float8_e4m3fn,
-            softmax_dtype=torch.float32,
-        ),
-        PrecisionConfig(
-            label="mixed_fp8_e4m3",
+            label="fp8_store",
             storage_dtype=torch.float8_e4m3fn,
             accumulation_dtype=torch.float32,
             softmax_dtype=torch.float32,

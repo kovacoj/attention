@@ -4,7 +4,7 @@ The purpose of this report is to study one analytically transparent component of
 
 These two approximation strategies are typically studied in isolation. This report asks what happens when they are composed: when the query-key logit computation is approximated by a randomized sketch, can the subsequent computation be carried out in mixed precision with only a lower-order loss of accuracy?
 
-The answer, as we show, is yes---and the mechanism is precise. Sketching reduces the effective dimension of the matrix product from $d$ to $s$, which simultaneously controls the sketching error (via the intrinsic rank of the query--key subspace) and shrinks the rounding error (because the inner dimension of the product is smaller). The main result (Theorem~\ref{thm:main}) gives an explicit total error bound and identifies the condition $s \cdot u \ll \varepsilon$ under which the rounding term is lower order, where $s$ is the sketch dimension, $u$ is the unit roundoff, and $\varepsilon$ is the sketch tolerance. This condition provides a concrete design rule: sketch dimension and precision should be chosen jointly, not independently.
+The answer, as we show, is yes---and the mechanism is precise. Sketching reduces the effective dimension of the matrix product from $d$ to $s$, which simultaneously controls the sketching error (via the intrinsic rank of the query--key subspace) and shrinks the finite-precision error (because the inner dimension of the product is smaller). The main result (Theorem~\ref{thm:main}) gives an explicit total error bound and identifies the condition $s \cdot u \ll \varepsilon$ under which the finite-precision term is lower order, where $s$ is the sketch dimension, $u$ is the unit roundoff, and $\varepsilon$ is the sketch tolerance. This condition provides a concrete design rule: sketch dimension and precision should be chosen jointly, not independently.
 
 \section{Operator-Theoretic Setup}
 
@@ -27,20 +27,16 @@ Accordingly, the attention output is the nonlinear operator
     \mathcal{A}(Q,K,V) := \Sigma\!\bigl(\mathcal{L}(Q,K)\bigr)V.
 \]
 
-Now let $S \in \mathbb{R}^{d \times s}$ with $s < d$. The associated rank-$s$ positive semidefinite operator on $\mathcal{H}_d$ is
+Now let $S \in \mathbb{R}^{d \times s}$ with $s < d$. The sketched logit operator is
 \[
-    P_S := SS^*.
+    \widetilde{\mathcal{L}}_S(Q,K) := d^{-1/2} QSS^*K^*.
 \]
-The sketched logit operator is then
-\[
-    \widetilde{\mathcal{L}}_S(Q,K) := d^{-1/2} QP_S K^*,
-\]
-and the corresponding sketched attention output is
+The operator $P_S := SS^*$ is positive semidefinite with rank at most $s$, but it is not in general an orthogonal projector unless the columns of $S$ are orthonormal. The corresponding sketched attention output is
 \[
     \widetilde{\mathcal{A}}_S(Q,K,V) := \Sigma\!\bigl(\widetilde{\mathcal{L}}_S(Q,K)\bigr)V.
 \]
 
-Thus the basic approximation step is the replacement of the identity on $\mathcal{H}_d$ by the finite-rank operator $P_S$.
+Thus the basic approximation step is the replacement of inner products $\langle q_i, k_j \rangle$ by sketched inner products $\langle S^* q_i, S^* k_j \rangle$.
 
 \section{Analytical Core}
 
@@ -58,46 +54,20 @@ The analysis begins with a stability property of the rowwise softmax map.
 \end{proposition}
 
 \begin{proof}
-    Let $\sigma : \mathbb{R}^n \to \mathbb{R}^n$ be the ordinary softmax map on vectors. Its Jacobian at $x \in \mathbb{R}^n$ is
-    \[
-        D\sigma(x) = \operatorname{Diag}(p) - pp^T,
-        \qquad
-        p := \sigma(x).
-    \]
-    For any $z \in \mathbb{R}^n$ one has
-    \[
-        z^T D\sigma(x) z
-        = \sum_{i=1}^n p_i z_i^2 - \Bigl(\sum_{i=1}^n p_i z_i\Bigr)^2
-        \leq \sum_{i=1}^n p_i z_i^2
-        \leq \|z\|_2^2.
-    \]
-    Hence $\|D\sigma(x)\|_2 \leq 1$ for all $x$, and the mean value theorem yields
-    \[
-        \|\sigma(x)-\sigma(y)\|_2 \leq \|x-y\|_2.
-    \]
-    Applying this estimate row by row gives
-    \[
-        \|\Sigma(L)-\Sigma(M)\|_{\mathrm{HS}}^2
-        = \sum_{i=1}^n \|\sigma(\ell_i)-\sigma(m_i)\|_2^2
-        \leq \sum_{i=1}^n \|\ell_i-m_i\|_2^2
-        = \|L-M\|_{\mathrm{HS}}^2,
-    \]
-    where $\ell_i$ and $m_i$ are the rows of $L$ and $M$. The second assertion follows from the submultiplicativity estimate
-    \[
-        \|XV\|_{\mathrm{HS}} \leq \|X\|_{\mathrm{HS}}\|V\|_2.
-    \]
+    Let $\sigma : \mathbb{R}^n \to \mathbb{R}^n$ be the softmax map on vectors with Jacobian $D\sigma(x) = \operatorname{Diag}(p) - pp^T$ where $p = \sigma(x)$. For any $z \in \mathbb{R}^n$, $z^T D\sigma(x)\,z = \sum_i p_i z_i^2 - (\sum_i p_i z_i)^2 \leq \|z\|_2^2$, so $\|D\sigma(x)\|_2 \leq 1$ for all $x$. The mean value theorem gives $\|\sigma(x)-\sigma(y)\|_2 \leq \|x-y\|_2$; applying this row by row and squaring yields the HS bound. The second assertion follows from $\|XV\|_{\mathrm{HS}} \leq \|X\|_{\mathrm{HS}}\|V\|_2$.
 \end{proof}
 
-The next proposition isolates the deterministic sketching error.
+The next proposition isolates the deterministic sketching error. Since attention logits are bilinear forms $q_i^* k_j$, the relevant notion is that $S$ approximately preserves inner products on the row space of $Q$ and $K$.
 
 \begin{proposition}[Deterministic sketching bound]
-    Let $U \subseteq \mathcal{H}_d$ be a subspace containing all row vectors of $Q$ and $K$. Assume that $P_S$ is an $\varepsilon$-approximate identity on $U$, in the sense that
+    \label{prop:deterministic}
+    Let $U \subseteq \mathcal{H}_d$ be a subspace containing all row vectors of $Q$ and $K$. Assume that $S$ is an $\varepsilon$-subspace embedding for $U$, meaning
     \[
-        \|(I-P_S)u\|_2 \leq \varepsilon \|u\|_2
+        \bigl|\langle S^*u, S^*v\rangle - \langle u, v\rangle\bigr| \leq \varepsilon\,\|u\|_2\,\|v\|_2
         \qquad
-        \text{for all } u \in U.
+        \text{for all } u, v \in U.
     \]
-    Then
+    Equivalently, the restriction of $SS^*$ to $U$ satisfies $\|SS^*|_U - I_U\|_2 \leq \varepsilon$. Then
     \[
         \|\mathcal{L}(Q,K)-\widetilde{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
         \leq
@@ -112,37 +82,25 @@ The next proposition isolates the deterministic sketching error.
 \end{proposition}
 
 \begin{proof}
-    Since
+    Since $\mathcal{L}-\widetilde{\mathcal{L}}_S = d^{-1/2}\, Q(I - SS^*)K^*$,
     \[
-        \mathcal{L}(Q,K)-\widetilde{\mathcal{L}}_S(Q,K)
-        = d^{-1/2} Q(I-P_S)K^*,
+        \|\mathcal{L}-\widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}
+        \leq d^{-1/2}\,\|Q(I-SS^*)\|_{\mathrm{HS}}\,\|K\|_2.
     \]
-    we obtain
-    \[
-        \|\mathcal{L}(Q,K)-\widetilde{\mathcal{L}}_S(Q,K)\|_{\mathrm{HS}}
-        \leq
-        \frac{1}{\sqrt d}\,\|Q(I-P_S)\|_{\mathrm{HS}}\,\|K^*\|_2.
-    \]
-    Every row of $Q$ lies in $U$, so the approximate-identity assumption implies
-    \[
-        \|Q(I-P_S)\|_{\mathrm{HS}} \leq \varepsilon \|Q\|_{\mathrm{HS}}.
-    \]
-    Using $\|K^*\|_2 = \|K\|_2$ proves the first estimate. The second follows from the previous proposition.
+    The subspace-embedding condition $\|SS^*|_U - I_U\|_2 \leq \varepsilon$ implies $\|(I-SS^*)|_U\|_2 \leq \varepsilon$, so every row $q_i$ of $Q$ (which lies in $U$) satisfies $\|q_i^*(I-SS^*)\|_2 \leq \varepsilon\|q_i\|_2$. Therefore $\|Q(I-SS^*)\|_{\mathrm{HS}} \leq \varepsilon\|Q\|_{\mathrm{HS}}$, proving the first estimate. The second follows from Proposition~1.
 \end{proof}
 
-The proposition should be read as a conditional stability statement: it does not assert that a rank-$s$ Gaussian sketch is an approximate identity on an arbitrary $d$-dimensional subspace. Rather, it separates the attention-stability argument from the probabilistic question of when the sketch preserves the relevant row geometry.
+The proposition should be read as a conditional stability statement: it separates the attention-stability argument from the probabilistic question of when the sketch approximately preserves inner products on the relevant subspace.
 
-This reduces the sketching analysis to a single geometric requirement on the finite-rank operator $P_S$. (Note that $P_S = SS^*$ is positive semidefinite and has rank at most $s$, but it is not an orthogonal projector unless the columns of $S$ are orthonormal.) In the randomized setting, the role of randNLA is to choose $S$ so that this requirement holds with high probability on a subspace that captures the geometry of the rows of $Q$ and $K$.
+The next result gives this probabilistic guarantee for Gaussian sketches. A scaled Gaussian matrix $S \in \mathbb{R}^{d \times s}$ with entries $\mathcal{N}(0, 1/s)$ is a subspace embedding for any fixed $r$-dimensional subspace with high probability, requiring $s = O(r/\varepsilon^2)$---not $O(d/\varepsilon^2)$.
 
-The next result makes this probabilistic. It shows that a Gaussian sketch of dimension $s = O(r/\varepsilon^2)$ suffices, where $r$ is the intrinsic rank of the query--key row space---not the ambient dimension $d$.
-
-\begin{proposition}[Probabilistic sketching guarantee]
+\begin{proposition}[Probabilistic subspace embedding guarantee]
     \label{prop:probabilistic}
-    Let $U \subseteq \mathcal{H}_d$ be the subspace spanned by the rows of $[Q^T \;\; K^T]$, and let $r := \dim U$. Let $S \in \mathbb{R}^{d \times s}$ have i.i.d.\ entries $S_{ij} \sim \mathcal{N}(0, 1/s)$. For $\varepsilon \in (0, 1)$ and $\delta \in (0, 1)$, if
+    Let $U \subseteq \mathcal{H}_d$ be an $r$-dimensional subspace. Let $S \in \mathbb{R}^{d \times s}$ have i.i.d.\ entries $S_{ij} \sim \mathcal{N}(0, 1/s)$. For $\varepsilon \in (0, 1)$ and $\delta \in (0, 1)$, if
     \[
-        s \;\geq\; \frac{r + \ln(2/\delta)}{\varepsilon^2},
+        s \;\geq\; \frac{r + \ln(1/\delta)}{\varepsilon^2},
     \]
-    then with probability at least $1 - \delta$, $P_S$ is an $\varepsilon$-approximate identity on $U$. Consequently, with the same probability,
+    then with probability at least $1 - \delta$, $S$ is an $\varepsilon$-subspace embedding for $U$. If $U$ contains the rows of $[Q^T \;\; K^T]$, then with the same probability,
     \[
         \|\mathcal{A}(Q,K,V)-\widetilde{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
         \leq
@@ -151,19 +109,7 @@ The next result makes this probabilistic. It shows that a Gaussian sketch of dim
 \end{proposition}
 
 \begin{proof}
-    By definition $P_S = SS^*$. Since the columns of $S$ are i.i.d.\ Gaussian vectors scaled by $1/\sqrt{s}$, the operator $P_S$ is the standard Johnson--Lindenstrauss projection onto a random $s$-dimensional subspace. For any fixed unit vector $u \in U$,
-    \[
-        \|P_S u\|_2^2 = \|S^* u\|_2^2
-    \]
-    follows a $\chi^2_s / s$ distribution. A standard tail bound~\autocite{HalkoMartinssonTropp2011} gives
-    \[
-        \Pr\bigl(\bigl|\|P_S u\|_2^2 - 1\bigr| > \varepsilon\bigr) \leq 2\exp\!\bigl(-s\varepsilon^2/2\bigr).
-    \]
-    Let $u_1, \ldots, u_r$ be an orthonormal basis of $U$. By a union bound over the $2r$ vectors $\{u_j, (I - P_S)u_j\}$, the event that $\|P_S u_j\|_2^2 \in [1-\varepsilon, 1+\varepsilon]$ for all $j$ has probability at least $1 - 2r \cdot 2\exp(-s\varepsilon^2/2)$. For any $u \in U$, write $u = \sum_{j=1}^r \alpha_j u_j$; then on this event,
-    \[
-        \|(I - P_S)u\|_2 \leq \varepsilon \|u\|_2
-    \]
-    by the near-isometry of $P_S$ on the span of the basis. The probability bound is at least $1-\delta$ when $s \geq (2r + 2\ln(2/\delta))/{\varepsilon^2}$. The stated condition $s \geq (r + \ln(2/\delta))/{\varepsilon^2}$ is a slightly looser but more transparent sufficient condition. The attention error bound then follows from Proposition~2.
+    Let $U \in \mathbb{R}^{d \times r}$ be a matrix whose columns form an orthonormal basis for $U$. Then $S$ is an $\varepsilon$-subspace embedding for $U$ if and only if $\|U^T SS^* U - I_r\|_2 \leq \varepsilon$. The matrix $U^T SS^* U = (S^* U)^*(S^* U)$ has the same distribution as $G^*G/s$ where $G \in \mathbb{R}^{s \times r}$ has i.i.d.\ standard normal entries. By the Johnson--Lindenstrauss lemma~\autocite{HalkoMartinssonTropp2011}, $\Pr(\|G^*G/s - I_r\|_2 > \varepsilon) \leq 2\exp(-s\varepsilon^2/4 + r)$ for $s \geq 4r/\varepsilon^2$. The stated condition $s \geq (r + \ln(1/\delta))/{\varepsilon^2}$ ensures the failure probability is at most $\delta$. The attention error bound follows from Proposition~\ref{prop:deterministic}.
 \end{proof}
 
 The key feature is the dependence on $r$ rather than $d$: when the query--key rows lie near a low-dimensional subspace, a much smaller sketch suffices.
@@ -206,9 +152,13 @@ where $u$ is the unit roundoff. For the sketched logit product $d^{-1/2}(QS)(KS)
     where the last step uses $\||A|\,|B^T|\|_{\mathrm{HS}} \leq \|A\|_2\,\|B\|_2\,\sqrt{n}$ (each row of $|A|$ has norm at most $\|A\|_2$, and similarly for $|B^T|$). Multiplying by $d^{-1/2}$ yields the logit bound. The attention-output bound follows from Proposition~1.
 \end{proof}
 
+\begin{remark}[Scope of the finite-precision bound]
+    The bound in Proposition~\ref{prop:rounding} models the error in the final sketched logit product $(QS)(KS)^*$, assuming that $QS$ and $KS$ are given exactly. The experiments measure a broader implementation error that also includes quantization of $Q$, $K$, $V$, and $S$ to the storage dtype before projection. Thus the measured $E_{\mathrm{fp}}$ is an upper bound on the multiplication-only error analyzed in the proposition.
+\end{remark}
+
 The factor $\gamma_s$ scales linearly with $s$: sketching reduces the finite-precision error by a factor of $s/d$ compared to the unsketched product. This is the formal statement of the intuition that ``compressing first makes low precision safer.''
 
-Combining the probabilistic sketching guarantee with the finite-precision error analysis yields the main result.
+Combining the probabilistic subspace embedding guarantee with the finite-precision error analysis yields the main result.
 
 \begin{theorem}[Mixed-precision sketched attention]
     \label{thm:main}
@@ -234,11 +184,11 @@ Combining the probabilistic sketching guarantee with the finite-precision error 
         \leq
         \bigl(\|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}} + \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}\bigr)\,\|V\|_2.
     \]
-    Apply Proposition~2 to the first term and Proposition~\ref{prop:rounding} to the second. For the lower-order claim, observe that $\gamma_s = O(s \cdot u)$ and $\|QS\|_2, \|KS\|_2 = O(\sqrt{\|Q\|_2\,\|K\|_2})$, so the rounding term is $O(s \cdot u \cdot \sqrt{n}\,\|Q\|_2\,\|K\|_2/\sqrt{d})$ while the sketching term is $\Theta(\varepsilon\,\|Q\|_{\mathrm{HS}}\,\|K\|_2/\sqrt{d})$.     The condition $s \cdot u \ll \varepsilon$ ensures the finite-precision term is dominated.
+    Apply Proposition~\ref{prop:deterministic} to the first term and Proposition~\ref{prop:rounding} to the second. For the lower-order claim, observe that $\gamma_s = O(s \cdot u)$ and $\|QS\|_2, \|KS\|_2 = O(\sqrt{\|Q\|_2\,\|K\|_2})$, so the finite-precision term is $O(s \cdot u \cdot \sqrt{n}\,\|Q\|_2\,\|K\|_2/\sqrt{d})$ while the sketching term is $\Theta(\varepsilon\,\|Q\|_{\mathrm{HS}}\,\|K\|_2/\sqrt{d})$. The condition $s \cdot u \ll \varepsilon$ ensures the finite-precision term is dominated.
 \end{proof}
 
 \begin{remark}[Design rule]
-    Theorem~\ref{thm:main} yields a concrete joint design rule. For unit roundoffs $u_{16} \approx 5 \times 10^{-4}$ (float16) and $u_{32} \approx 6 \times 10^{-8}$ (float32), the condition $s \cdot u \ll \varepsilon$ is satisfied for all practical sketch dimensions ($s \leq 128$) and tolerances ($\varepsilon \geq 0.01$). This means that in the typical operating regime, the finite-precision error is negligible and the total accuracy is governed entirely by the sketch dimension. The rule also reveals a regime to avoid: if $s$ is chosen too large relative to $1/u$, the finite-precision error can overtake the sketching error, defeating the purpose of mixed precision.
+    Theorem~\ref{thm:main} yields a concrete joint design rule. For float16 ($u_{16} \approx 5 \times 10^{-4}$) and typical sketch dimensions $s \leq 64$, we have $s \cdot u_{16} \leq 0.032$, which is comfortably smaller than typical sketch tolerances $\varepsilon \geq 0.1$. For float32 ($u_{32} \approx 6 \times 10^{-8}$), the condition is essentially always satisfied. For float8 E4M3 ($u_{\text{fp8}} \approx 0.0625$), even $s = 16$ gives $s \cdot u_{\text{fp8}} \approx 1.0$, which is comparable to $\varepsilon$---so the finite-precision term is no longer clearly lower order. The rule also reveals a regime to avoid: if $s$ is chosen too large relative to $1/u$, the finite-precision error can overtake the sketching error, defeating the purpose of mixed precision.
 \end{remark}
 
 \section{Numerical Experiments}
@@ -249,132 +199,46 @@ The experiments probe the decomposition of Theorem~\ref{thm:main} directly. For 
     \item $\widetilde{\mathcal{L}}_S(Q,K)$: exact sketched logits in \texttt{float64};
     \item $\widehat{\mathcal{L}}_S(Q,K)$: sketched logits in the target precision.
 \end{enumerate}
-The sketching term is $\|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$ and the rounding term is $\|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$, both measured in Hilbert--Schmidt norm. The same decomposition is recorded for the attention output. We test three precision configurations: \texttt{full\_fp32} (all stages in float32), \texttt{full\_fp16} (all stages in float16), and \texttt{mixed\_fp16} (storage in float16, accumulation and softmax in float32).
+The sketching error is $E_{\mathrm{sk}} := \|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$ and the finite-precision error is $E_{\mathrm{fp}} := \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$. The total error is $E_{\mathrm{tot}} := \|\mathcal{L} - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$. The same decomposition is recorded for the attention output. We test four precision configurations: \texttt{fp32} (all stages in float32), \texttt{full\_fp16} (all stages in float16), \texttt{mixed\_fp16} (storage in float16, accumulation and softmax in float32), and \texttt{fp8\_store} (storage in float8 E4M3, accumulation and softmax in float32).
 
-The sketch $S \in \mathbb{R}^{d \times s}$ is a scaled Gaussian matrix with i.i.d.\ $\mathcal{N}(0, 1/s)$ entries; the scaling is chosen so that $\mathbb{E}[SS^*] = I_d$. We sweep $n \in \{64, 128, 256\}$, $d \in \{32, 64\}$, $s \in \{8, 16, 24, 32\}$, and average over three seeds.
+The sketch $S \in \mathbb{R}^{d \times s}$ is a scaled Gaussian matrix with i.i.d.\ $\mathcal{N}(0, 1/s)$ entries; the scaling is chosen so that $\mathbb{E}[SS^*] = I_d$. We sweep $n \in \{64, 128, 256\}$, $d \in \{32, 64\}$, $s \in \{8, 16, 24, 32\}$, and average over three seeds. Data and sketch seeds are independent.
 
-Table~1 reports the HS errors of the logits for $n = 256$, $d = 64$; the output errors showed the same qualitative ordering and are not reproduced in the table. For fp32 and fp16, the sketching term is 3--4 orders of magnitude larger than the finite-precision term; the total error is sketching-dominated. For fp8 (E4M3, $u \approx 0.0625$), the finite-precision term is comparable to or larger than the sketching term, and the total error is no longer governed by the sketch dimension alone. This is the ``regime to avoid'' predicted by Theorem~\ref{thm:main}: for $s = 32$, $s \cdot u_{\text{fp8}} \approx 2.0$, which violates $s \cdot u \ll \varepsilon$.
+Table~\ref{tab:results} reports absolute and relative HS errors of the logits for $n = 256$, $d = 64$; the output errors showed the same qualitative ordering and are omitted.
 
 \begin{table}[ht]
 \centering
-\caption{Hilbert--Schmidt errors of the logit matrix ($n = 256$, $d = 64$, averaged over 3 seeds). Sketching error $E_{\mathrm{sk}} := \|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$; finite-precision error $E_{\mathrm{fp}} := \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$; ratio $E_{\mathrm{sk}} / E_{\mathrm{fp}}$. Ratios $< 1$ (finite-precision term dominates) are shown in bold.}
+\caption{Hilbert--Schmidt errors of the logit matrix ($n = 256$, $d = 64$, averaged over 3 seeds). $E_{\mathrm{sk}} = \|\mathcal{L} - \widetilde{\mathcal{L}}_S\|_{\mathrm{HS}}$; $E_{\mathrm{fp}} = \|\widetilde{\mathcal{L}}_S - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$; $E_{\mathrm{tot}} = \|\mathcal{L} - \widehat{\mathcal{L}}_S\|_{\mathrm{HS}}$; $\|\mathcal{L}\|_{\mathrm{HS}} \approx 256$.}
 \label{tab:results}
 \small
-\begin{tabular}{ll rrr}
+\begin{tabular}{ll rrr r}
 \toprule
-Configuration & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{fp}}$ & $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ \\
+Config & $s$ & $E_{\mathrm{sk}}$ & $E_{\mathrm{fp}}$ & $E_{\mathrm{tot}}$ & $E_{\mathrm{sk}}/E_{\mathrm{fp}}$ \\
 \midrule
-\texttt{full\_fp32}  &  8 & 6.23e+02 & 9.92e-05 & 6.3e+06 \\
-                     & 16 & 4.73e+02 & 9.79e-05 & 4.8e+06 \\
-                     & 24 & 3.49e+02 & 7.86e-05 & 4.4e+06 \\
-                     & 32 & 3.10e+02 & 7.42e-05 & 4.2e+06 \\
+\texttt{fp32}      &  8 & 7.22e2 & 1.2e-4 & 7.22e2 & 5.9e6 \\
+                   & 16 & 5.03e2 & 1.1e-4 & 5.03e2 & 4.4e6 \\
+                   & 24 & 4.27e2 & 9.4e-5 & 4.27e2 & 4.5e6 \\
+                   & 32 & 3.70e2 & 9.1e-5 & 3.70e2 & 4.1e6 \\
 \midrule
-\texttt{full\_fp16}  &  8 & 6.23e+02 & 3.70e-01 & 1.7e+03 \\
-                     & 16 & 4.73e+02 & 2.51e-01 & 1.9e+03 \\
-                     & 24 & 3.49e+02 & 2.12e-01 & 1.6e+03 \\
-                     & 32 & 3.10e+02 & 1.82e-01 & 1.7e+03 \\
+\texttt{full\_fp16}  &  8 & 7.22e2 & 4.1e-1 & 7.22e2 & 1.8e3 \\
+                     & 16 & 5.03e2 & 2.9e-1 & 5.03e2 & 1.8e3 \\
+                     & 24 & 4.27e2 & 2.6e-1 & 4.27e2 & 1.7e3 \\
+                     & 32 & 3.70e2 & 2.3e-1 & 3.70e2 & 1.6e3 \\
 \midrule
-\texttt{mixed\_fp16} &  8 & 6.23e+02 & 3.38e-01 & 1.8e+03 \\
-                     & 16 & 4.73e+02 & 2.30e-01 & 2.1e+03 \\
-                     & 24 & 3.49e+02 & 1.95e-01 & 1.8e+03 \\
-                     & 32 & 3.10e+02 & 1.67e-01 & 1.9e+03 \\
+\texttt{mixed\_fp16} &  8 & 7.22e2 & 3.8e-1 & 7.22e2 & 1.9e3 \\
+                     & 16 & 5.03e2 & 2.6e-1 & 5.03e2 & 1.9e3 \\
+                     & 24 & 4.27e2 & 2.4e-1 & 4.27e2 & 1.8e3 \\
+                     & 32 & 3.70e2 & 2.1e-1 & 3.70e2 & 1.8e3 \\
 \midrule
-\texttt{full\_fp8}   &  8 & 6.23e+02 & 9.37e+00 & \textbf{6.7e+01} \\
-                     & 16 & 4.73e+02 & 6.26e+00 & \textbf{7.6e+01} \\
-                     & 24 & 3.49e+02 & 4.97e+00 & \textbf{7.0e+01} \\
-                     & 32 & 3.10e+02 & 4.59e+00 & \textbf{6.8e+01} \\
-\midrule
-\texttt{mixed\_fp8}  &  8 & 6.23e+02 & 9.37e+00 & \textbf{6.7e+01} \\
-                     & 16 & 4.73e+02 & 6.26e+00 & \textbf{7.6e+01} \\
-                     & 24 & 3.49e+02 & 4.97e+00 & \textbf{7.0e+01} \\
-                     & 32 & 3.10e+02 & 4.59e+00 & \textbf{6.8e+01} \\
+\texttt{fp8\_store}  &  8 & 7.22e2 & 5.0e1  & 7.21e2 & 1.4e1 \\
+                     & 16 & 5.03e2 & 3.4e1  & 5.01e2 & 1.5e1 \\
+                     & 24 & 4.27e2 & 3.0e1  & 4.26e2 & 1.4e1 \\
+                     & 32 & 3.70e2 & 2.6e1  & 3.70e2 & 1.4e1 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ is consistently large ($10^3$--$10^6$), confirming that the dominant error source is the randomized sketch. Second, mixed precision and naive fp16 have finite-precision errors of the same order, consistent with Proposition~\ref{prop:rounding}: storage quantization (the $s \cdot u$ factor) dominates any benefit from higher-precision accumulation. Third, and most strikingly, fp8 inverts the ratio: $E_{\mathrm{sk}} / E_{\mathrm{fp}} \approx 70$, meaning the finite-precision term is now $1.5\%$ of the sketching term---no longer lower order. This is exactly the regime Theorem~\ref{thm:main} warns against: for $s = 32$ and $u_{\text{fp8}} \approx 0.0625$, we have $s \cdot u \approx 2.0 \gg \varepsilon$. The total error at fp8 is therefore substantially worse than at fp16, and increasing $s$ alone cannot recover accuracy because the finite-precision term grows with $s$. The experiments thus validate both halves of the design rule: fp16 and fp32 satisfy $s \cdot u \ll \varepsilon$ and the total error is sketching-dominated; fp8 violates it and the total error is degraded.
-
-\section{Infinite-Dimensional Limit}
-
-The finite-dimensional analysis above has a natural extension to compact operators on separable Hilbert spaces, which clarifies how the sketching error depends on the spectral decay of the query--key covariance rather than on any ambient dimension.
-
-\subsection{Setup}
-
-Let $\mathcal{H}$ and $\mathcal{K}$ be separable Hilbert spaces. We consider compact operators
-\[
-    Q, K : \mathcal{H} \to \mathcal{K},
-\]
-with Hilbert--Schmidt adjoints $Q^*, K^* : \mathcal{K} \to \mathcal{H}$. The logit operator is
-\[
-    \mathcal{L} = d^{-1/2}\, QK^* \in \mathcal{L}(\mathcal{K}),
-\]
-where $d > 0$ is a scaling parameter (the embedding dimension in the finite case). The attention output is $\mathcal{A} := \Sigma(\mathcal{L})V$ for a compact $V : \mathcal{H} \to \mathcal{K}$, with $\Sigma$ defined rowwise as before (now acting on the matrix elements of $\mathcal{L}$ in any fixed orthonormal basis of $\mathcal{K}$).
-
-\subsection{Spectral structure}
-
-Since $Q$ and $K$ are compact, their singular value decompositions converge:
-\[
-    Q = \sum_{j=1}^{\infty} \sigma_j(Q)\, u_j \otimes v_j,
-    \qquad
-    K = \sum_{j=1}^{\infty} \sigma_j(K)\, w_j \otimes z_j,
-\]
-where $\{\sigma_j\} \in \ell^2$ are the singular values (arranged in nonincreasing order) and $\{u_j\}, \{v_j\}, \{w_j\}, \{z_j\}$ are orthonormal systems. The combined row space
-\[
-    \mathcal{U} := \overline{\operatorname{span}}\{v_j, z_j : j \geq 1\} \subseteq \mathcal{H}
-\]
-is the infinite-dimensional analogue of the subspace $U$ in Proposition~2.
-
-\subsection{Finite-rank approximation}
-
-Let $\{P_s\}_{s=1}^{\infty}$ be an increasing sequence of finite-rank orthogonal projections on $\mathcal{H}$ with $P_s \to I$ strongly on $\mathcal{U}$. (In the finite-dimensional setting, $P_s = SS^*$ plays this role after orthogonalisation.) The sketched logit operator is
-\[
-    \widetilde{\mathcal{L}}_s := d^{-1/2}\, QP_s K^*.
-\]
-
-\begin{proposition}[Spectral convergence of sketched attention]
-    \label{prop:spectral}
-    Let $\varepsilon_s := \|(I - P_s)|_{\mathcal{U}}\|_2$ and suppose $\varepsilon_s \to 0$ as $s \to \infty$. Then:
-    \begin{enumerate}
-        \item $\|\mathcal{L} - \widetilde{\mathcal{L}}_s\|_{\mathrm{HS}} \leq d^{-1/2}\,\varepsilon_s\,\|Q\|_{\mathrm{HS}}\,\|K\|_2$.
-        \item $\|\mathcal{A} - \widetilde{\mathcal{A}}_s\|_{\mathrm{HS}} \leq d^{-1/2}\,\varepsilon_s\,\|Q\|_{\mathrm{HS}}\,\|K\|_2\,\|V\|_2$.
-        \item If the singular values of $Q$ and $K$ decay as $\sigma_j(Q), \sigma_j(K) = O(j^{-\alpha})$ for some $\alpha > 1/2$, then choosing $P_s$ to project onto the leading $s$ singular vectors yields
-        \[
-            \varepsilon_s = O(s^{-\alpha+1/2}),
-        \]
-        and consequently $\|\mathcal{A} - \widetilde{\mathcal{A}}_s\|_{\mathrm{HS}} \to 0$ at rate $O(s^{-\alpha+1/2})$.
-    \end{enumerate}
-\end{proposition}
-
-\begin{proof}
-    Claims (i) and (ii) are identical to Proposition~2, with the same proof: the compactness of $Q$ and $K$ ensures that the Hilbert--Schmidt norms are finite, and the approximate-identity bound $\|Q(I - P_s)\|_{\mathrm{HS}} \leq \varepsilon_s \|Q\|_{\mathrm{HS}}$ follows from the definition of $\varepsilon_s$.
-
-    For claim (iii), let $P_s$ project onto $\operatorname{span}\{v_1, \ldots, v_s, z_1, \ldots, z_s\}$. Then for any $u \in \mathcal{U}$, writing $u = \sum_{j=1}^{\infty} \alpha_j v_j + \sum_{j=1}^{\infty} \beta_j z_j$ with $\sum \alpha_j^2 + \beta_j^2 = \|u\|^2$, we have
-    \[
-        \|(I - P_s)u\|^2 = \sum_{j > s} \alpha_j^2 + \sum_{j > s} \beta_j^2.
-    \]
-    The worst case over unit vectors is bounded by the spectral decay: by the Courant--Fischer minimax principle, $\varepsilon_s^2 \leq \max(\sigma_{s+1}^2(Q), \sigma_{s+1}^2(K))$. Under the power-law decay $\sigma_j = O(j^{-\alpha})$, this gives $\varepsilon_s = O(s^{-\alpha+1/2})$.
-\end{proof}
-
-\begin{remark}[Interpretation]
-    Proposition~\ref{prop:spectral} shows that the convergence rate of sketched attention is entirely governed by the spectral decay of $Q$ and $K$. When the singular values decay rapidly (e.g., exponentially, as is typical for smooth kernels), the finite-rank approximation converges spectrally fast, and the sketch dimension $s$ can be much smaller than any notion of ambient dimension. The $\alpha > 1/2$ condition is precisely the requirement that $Q$ and $K$ be Hilbert--Schmidt class, i.e.\ that $\sum_j \sigma_j^2 < \infty$.
-\end{remark}
-
-\begin{remark}[Randomised sketch in the infinite limit]
-    In the finite-dimensional case, a Gaussian sketch $S \in \mathbb{R}^{d \times s}$ with $s = O(r/\varepsilon^2)$ achieves $\varepsilon_s \leq \varepsilon$ with high probability (Proposition~4). In the infinite-dimensional limit, the role of $r$ is played by the \emph{effective rank} $\rho_\alpha := \sum_{j=1}^{\infty} \sigma_j^{2\alpha}$, which is finite whenever $\alpha > 1/2$. The required sketch dimension then scales as $s = O(\rho_\alpha / \varepsilon^2)$, independent of any ambient dimension. This gives the infinite-dimensional analogue of Theorem~\ref{thm:main}: under the same finite-precision model, the total error satisfies
-    \[
-        \|\mathcal{A} - \widehat{\mathcal{A}}_s\|_{\mathrm{HS}}
-        \leq
-        \frac{1}{\sqrt{d}}
-        \Bigl(
-            \varepsilon\, \|Q\|_{\mathrm{HS}}\,\|K\|_2
-            +
-            \gamma_s\, \|QP_s\|_2\,\|P_sK\|_2\,\sqrt{n}
-        \Bigr)
-        \|V\|_2
-    \]
-    with probability at least $1 - \delta$ when $s \geq O(\rho_\alpha / \varepsilon^2 + \ln(1/\delta) / \varepsilon^2)$, and the finite-precision term remains lower order when $s \cdot u \ll \varepsilon$.
-\end{remark}
+Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\mathrm{fp}}$ is consistently large ($10^3$--$10^6$), confirming that the dominant error source is the randomized sketch. The relative sketching error exceeds 140\%, while the relative finite-precision error is below 0.16\%. Second, \texttt{full\_fp16} and \texttt{mixed\_fp16} have finite-precision errors of the same order, consistent with Proposition~\ref{prop:rounding}: storage quantization (the $s \cdot u$ factor) dominates any benefit from higher-precision accumulation. Third, fp8 storage substantially increases the finite-precision error relative to fp16 (from $\sim$0.3 to $\sim$30 in absolute terms, or from $\sim$0.1\% to $\sim$10\% relative), but the sketching error still dominates by a factor of $\sim$14--15. That is, fp8 storage degrades accuracy noticeably compared to fp16, yet in the tested synthetic regime the total error remains sketching-dominated. A regime where finite precision dominates would require even lower precision or larger $s$; the current experiments do not reach it. Thus the results support the error decomposition and illustrate the degradation predicted by Theorem~\ref{thm:main} for increasing $s \cdot u$, but they do not demonstrate a full inversion of the error ratio.
 
 \section{Outlook}
 
-The present report studies only the feature-sketch model $QK^* \approx QSS^*K^*$. The natural extensions are Nystr\"om-type approximations and random-feature approximations of the softmax kernel, which would connect the project more directly with the efficient-attention literature~\autocite{XiongEtAl2021, ChoromanskiEtAl2021}. Another direction is to replace the Gaussian sketch by a structured random matrix (e.g., a subsampled randomized Hadamard transform), which would yield the same probabilistic guarantees with lower computational cost.
+The present report studies only the feature-sketch model $QK^* \approx QSS^*K^*$. The natural extensions are Nystr\"om-type approximations and random-feature approximations of the softmax kernel, which would connect the project more directly with the efficient-attention literature~\autocite{XiongEtAl2021, ChoromanskiEtAl2021}. Another direction is to replace the Gaussian sketch by a structured random matrix (e.g., a subsampled randomized Hadamard transform), which would yield the same subspace-embedding guarantees with lower computational cost. A possible extension would replace finite-dimensional matrices by Hilbert--Schmidt operators and study convergence under compactness or spectral-decay assumptions; we do not pursue this here.
