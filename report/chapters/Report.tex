@@ -61,7 +61,7 @@ The next proposition isolates the deterministic sketching error. Since attention
 
 \begin{proposition}[Deterministic sketching bound]
     \label{prop:deterministic}
-    Let $U \subseteq \mathcal{H}_d$ be the subspace spanned by the rows of $[Q^T \;\; K^T]$, and let $r := \dim U$. Assume that $S$ is an $\varepsilon$-subspace embedding for $U$, meaning
+    Let $U \subseteq \mathcal{H}_d$ be the joint row space of $Q$ and $K$, equivalently the subspace spanned by the columns of $[Q^T \;\; K^T]$, and let $r := \dim U$. Assume that $S$ is an $\varepsilon$-subspace embedding for $U$, meaning
     \[
         \bigl|\langle S^*u, S^*v\rangle - \langle u, v\rangle\bigr| \leq \varepsilon\,\|u\|_2\,\|v\|_2
         \qquad
@@ -106,7 +106,7 @@ The next result gives this probabilistic guarantee for Gaussian sketches. A scal
     \[
         s \;\geq\; C\,\frac{r + \ln(1/\delta)}{\varepsilon^2},
     \]
-    for a universal constant $C$, then with probability at least $1 - \delta$, $S$ is an $\varepsilon$-subspace embedding for $U$. If $U$ contains the rows of $[Q^T \;\; K^T]$, then with the same probability,
+    for a universal constant $C$, then with probability at least $1 - \delta$, $S$ is an $\varepsilon$-subspace embedding for $U$. If $U$ contains the joint row space of $Q$ and $K$, then with the same probability,
     \[
         \|\mathcal{A}(Q,K,V)-\widetilde{\mathcal{A}}_S(Q,K,V)\|_{\mathrm{HS}}
         \leq
