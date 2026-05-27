@@ -8,6 +8,8 @@ The analytical core is Proposition~\ref{prop:local-perturbation}, a local pertur
 
 Sketching-based attention approximations~\autocite{HalkoMartinssonTropp2011, Mahoney2016, WangEtAl2020, XiongEtAl2021, ChoromanskiEtAl2021} are retained as a methodological baseline: they provide a controlled stress test in which the error decomposition can be verified under a known approximation floor. But they are not the main contribution.
 
+Although the experiments below focus mainly on floating-point precision policies, the same placement question also covers quantization. In quantized inference, the choice is not only which dtype to use, but also which tensors to quantize, how to choose scales and zero-points, whether calibration is dynamic or static, and which reductions must remain in higher precision. We therefore treat quantization as an extension of the same local-perturbation framework.
+
 \section{Operator-Theoretic Setup}
 
 Let $\mathcal{H}_d := \mathbb{R}^d$ and $\mathcal{H}_n := \mathbb{R}^n$, both finite-dimensional Hilbert spaces endowed with their standard Euclidean inner products. We view matrices in $\mathbb{R}^{n \times d}$ as Hilbert--Schmidt operators
@@ -30,6 +32,47 @@ Accordingly, the attention output is the nonlinear operator
 \]
 
 \section{Analytical Core}
+
+\subsection{Mixed Precision versus Quantization}
+
+In this report we distinguish mixed precision from quantization. Mixed precision changes the floating-point format used at different stages of a computation, for example storing $Q,K,V$ in \texttt{float16} or \texttt{bfloat16} while accumulating $QK^T$ and computing the softmax in \texttt{float32}. Quantization is more explicit: a real-valued tensor $X$ is mapped to a discrete low-bit representation and then, for computation, usually dequantized back to a floating-point format.
+
+A common affine quantization model is
+\[
+    x \approx S(x_q - Z),
+\]
+where $x_q$ is the quantized integer value, $S > 0$ is a scale, and $Z$ is a zero-point chosen so that real zero can be represented exactly. Equivalently,
+\[
+    x_q = \operatorname{clip}\!\left(
+        \operatorname{round}(x/S + Z)
+    \right).
+\]
+Symmetric quantization corresponds to the special case $Z = 0$ after choosing a symmetric representable range. The scale and zero-point may be chosen per tensor or per channel, and activation ranges may be determined dynamically, by static calibration, or during quantization-aware training.
+
+For attention, quantization is another precision-placement mechanism. One may quantize $Q,K,V$, the logits $L = QK^T/\sqrt{d}$, the attention probabilities $\Sigma(L)$, or the final output. The perturbation framework below treats quantization by writing
+\[
+    \widehat{X} = X + \Delta_{\mathrm{quant}}X
+\]
+for each quantized tensor, where $\Delta_{\mathrm{quant}}X = D(Q(X)) - X$. Thus quantization errors enter the same local error bound as floating-point storage and rounding errors, but their structure is different: they depend on calibration range, clipping, scale granularity, and dequantization policy.
+
+\begin{table}[ht]
+\centering
+\caption{Mixed precision and quantization as precision-placement mechanisms.}
+\label{tab:mixed-vs-quantization}
+\small
+\begin{tabular}{lll}
+\toprule
+Mechanism & Typical form & Main error source \\
+\midrule
+Mixed precision & fp16/bf16/fp8 storage, fp32 accumulation & floating-point rounding and overflow/underflow \\
+Affine quantization & $x \approx S(x_q - Z)$ & rounding, clipping, calibration error \\
+Symmetric quantization & $x \approx Sx_q$ & rounding and clipping under symmetric range \\
+Dynamic activation quantization & runtime range estimation & range-estimation overhead and variability \\
+Static activation quantization & calibrated range from representative data & calibration mismatch \\
+Quantization-aware training & fake quantization during training & training adapts to quantization noise \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 The analysis begins with a stability property of the rowwise softmax map, which is used in both the exact-attention and sketching bounds.
 
@@ -260,7 +303,7 @@ and the softmax amplification ratio
     \rho_{\mathrm{softmax}} = \frac{\frac1n \sum_{i=1}^n \|p_i-\widehat p_i\|_1}{\frac1n \sum_{i=1}^n \|\ell_i-\widehat \ell_i\|_\infty}.
 \]
 
-We test the following policy family: \texttt{fp32\_reference}, \texttt{bf16\_safe}, \texttt{fp16\_safe}, low-precision logit storage, low-precision softmax, and low-precision value accumulation. The ``safe'' policies keep storage low precision but preserve fp32 accumulation and fp32 softmax. This separation is the core experimental point: the question is not whether one global dtype works, but which \emph{locations} are sensitive.
+We test the following policy family: \texttt{fp32\_reference}, \texttt{bf16\_safe}, \texttt{fp16\_safe}, low-precision logit storage, low-precision softmax, and low-precision value accumulation. The ``safe'' policies keep storage low precision but preserve fp32 accumulation and fp32 softmax. This separation is the core experimental point: the question is not whether one global dtype works, but which \emph{locations} are sensitive. The \texttt{fp8\_store} policy in the sketching baseline (Table~\ref{tab:results}) should be interpreted as a floating-point quantization-like storage policy rather than affine integer quantization: it reduces representational precision, but it does not introduce an explicit scale and zero-point. In contrast, an int8 attention policy would require choosing calibration ranges for $Q,K,V$, possibly per tensor or per channel, and would introduce clipping error in addition to floating-point rounding.
 
 \begin{table}[ht]
 \centering
@@ -410,7 +453,7 @@ Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\m
 
 \section{Outlook}
 
-The main contribution of this report is the precision-placement decomposition of Proposition~\ref{prop:local-perturbation} and its empirical validation: low-precision softmax is the clearest failure mode in exact attention, while low-precision storage of $Q,K,V$ with fp32 accumulation is typically safe. The sketching baseline (Theorem~\ref{thm:main}) confirms that the finite-precision term remains lower order as long as $s \cdot u \ll \varepsilon$.
+The main contribution of this report is the precision-placement decomposition of Proposition~\ref{prop:local-perturbation} and its empirical validation: low-precision softmax is the clearest failure mode in exact attention, while low-precision storage of $Q,K,V$ with fp32 accumulation is typically safe. The sketching baseline (Theorem~\ref{thm:main}) confirms that the finite-precision term remains lower order as long as $s \cdot u \ll \varepsilon$. Mixed precision and quantization are both precision-placement mechanisms, but quantization adds calibration and clipping error; the same local perturbation framework applies to both, provided the quantized tensor is modeled as $X + \Delta X$, where $\Delta X$ is controlled not only by unit roundoff but also by scale, zero-point, range selection, and saturation.
 
 Several directions remain open. First, the current experiments use small problem sizes ($n \leq 256$, $d \leq 64$); scaling to realistic transformer dimensions will require either GPU acceleration or the JAX backend scaffold already present in the repository. Second, FP8 policies are reported only under an explicit quantization model; a more complete treatment would include hardware-specific scaling and dequantization. Third, the phase-diagram analogy from Decelle et al.~\autocite{DecelleEtAl2011} suggests mapping not only average error but also regime changes: when does low-precision logit storage remain harmless, when does low-precision softmax begin to amplify, and when does no practical low-precision policy preserve the reference behavior? The current data already hints at these transitions but does not yet chart them systematically. Fourth, the JAX-focused mixed-precision framework of Graefe and Trimpe~\autocite{GraefeTrimpe2025} provides a natural implementation path for the safe/unsafe policy distinctions identified here. We note that the current JAX backend in the repository maps PyTorch fp8 dtypes to JAX float16, so JAX-based fp8 experiments would require a dedicated quantization path and should not be compared directly with PyTorch fp8 results.
 
