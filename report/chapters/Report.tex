@@ -470,6 +470,56 @@ Policy & depth 4 & depth 8 & depth 2 & depth 4 \\
 
 Table~\ref{tab:residual} reports $E_{\mathrm{depth}}$ for both Gaussian and transformer-activation residual stacks. On Gaussian data, error grows modestly with depth for all policies: the fp16-safe error roughly doubles from $L = 4$ to $L = 8$, while the bf16-safe error grows by roughly 50\%. The low-precision value policies show the steepest depth growth, consistent with the $\sqrt{n}\|\Delta V\|_{\mathrm{HS}}$ term in Proposition~\ref{prop:local-perturbation} accumulating across layers. On transformer activations, the residual scaling $h = 1/L$ keeps errors approximately constant or even decreasing with depth, reflecting the stabilizing effect of small residual contributions.
 
+\subsection{Ising Magnetization as a Learnability-Transition Test}
+
+To study whether reduced precision creates a training-time barrier, we add a toy Ising magnetization task. Each data point is an $L\times L$ spin configuration
+\[
+    X \in \{-1,+1\}^{L\times L},
+\]
+sampled from the two-dimensional Ising model at a range of temperatures around the critical value $T_c\approx 2.269$. The normalized magnetization is
+\[
+    m(X)=\frac{1}{L^2}\sum_{i,j}X_{ij}\in[-1,1],
+\]
+and the regression target is the order parameter
+\[
+    y=|m(X)|\in[0,1].
+\]
+Each lattice site is treated as a token containing the spin value and its normalized two-dimensional position. A small one-head attention regressor ($d_{\mathrm{model}}=32$, depth $1$) is trained to predict $|m(X)|$ via MSE loss.
+
+This task is intentionally simple: a full model could compute magnetization by averaging. Its purpose is diagnostic rather than architectural. It gives a controlled setting in which microscopic spins must be aggregated into a macroscopic order parameter, while the data distribution itself changes sharply near the physical critical temperature.
+
+We compare full-precision training, low-precision training from scratch, RandNLA-sketched attention training from scratch, and post-training compression of a full-precision model. The hypothesis is that post-training compression can preserve a learned high-margin solution, while training with too much numerical or randomized approximation error from the beginning can prevent the attention layer from forming a useful global aggregation pattern.
+
+\begin{table}[ht]
+\centering
+\caption{Ising magnetization learning-transition experiment. Target is $|m(X)|$ for $L=12$ Ising configurations. Success means $R^2\ge 0.90$ on the test set. The full sweep is committed in \texttt{results/ising\_learning\_transition.dev.csv}.}
+\label{tab:ising-learning}
+\small
+\begin{tabular}{llrrrr}
+\toprule
+Train policy & Eval policy & Test MSE & Test MAE & $R^2$ & Success \\
+\midrule
+\texttt{fp32} & \texttt{fp32}             & 2.8e-3 & 4.3e-2 & 0.976 & 1 \\
+\texttt{bf16\_safe} & \texttt{bf16\_safe} & 2.8e-3 & 4.3e-2 & 0.976 & 1 \\
+\texttt{fp16\_safe} & \texttt{fp16\_safe} & 2.8e-3 & 4.3e-2 & 0.975 & 1 \\
+\texttt{int8\_qkv\_dyn} & \texttt{int8\_qkv\_dyn} & 2.9e-3 & 4.4e-2 & 0.975 & 1 \\
+\texttt{int8\_logits\_dyn} & \texttt{int8\_logits\_dyn} & 2.8e-3 & 4.3e-2 & 0.976 & 1 \\
+\texttt{sketch\_4} & \texttt{sketch\_4}   & 2.7e-3 & 4.3e-2 & 0.977 & 1 \\
+\texttt{sketch\_8} & \texttt{sketch\_8}   & 2.9e-3 & 4.3e-2 & 0.975 & 1 \\
+\texttt{sketch\_16} & \texttt{sketch\_16}  & 3.0e-3 & 4.3e-2 & 0.974 & 1 \\
+\midrule
+\texttt{fp32} & \texttt{bf16\_safe\_eval} & 3.8e-3 & 5.0e-2 & 0.967 & 1 \\
+\texttt{fp32} & \texttt{int8\_logits\_dyn\_eval} & 3.8e-3 & 5.0e-2 & 0.967 & 1 \\
+\texttt{fp32} & \texttt{sketch\_4\_eval} & 3.8e-3 & 5.0e-2 & 0.967 & 1 \\
+\texttt{fp32} & \texttt{sketch\_16\_eval} & 3.8e-3 & 5.0e-2 & 0.967 & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+In this small diagnostic setting, all policies learn the magnetization task: every training run achieves $R^2\ge 0.97$ and the success rate is $100\%$ across all precision and sketch configurations. Post-training compression of the full-precision model yields a small degradation ($R^2\approx 0.967$) but remains well above the success threshold. The attention matrices are uniformly diffuse ($H_{\mathrm{attn}}/\log N\approx 1.0$, $M_{\mathrm{attn}}\approx 1/N$), consistent with the model learning a global averaging strategy that does not require sharp, localized attention.
+
+This indicates that the task is still too easy to expose a sharp learnability transition. The experiment nevertheless validates the pipeline and suggests that a harder variant---such as masked-spin magnetization prediction, where the model must infer the macroscopic order from partial microscopic evidence---is needed to reveal the hypothesized training barrier. Such a variant would make localized attention more advantageous and increase the sensitivity of the training dynamics to precision and sketch noise.
+
 \subsection{A Stress-Test Baseline}
 
 The experiments in this subsection probe the decomposition of Theorem~\ref{thm:main} directly. For each combination of parameters $(n, d, s)$ and each precision configuration we compute three logit matrices:
@@ -524,6 +574,6 @@ Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\m
 
 The main contribution of this report is the precision-placement decomposition of Proposition~\ref{prop:local-perturbation} and its empirical validation: low-precision softmax is the clearest failure mode in exact attention, while low-precision storage of $Q,K,V$ with fp32 accumulation is typically safe. The sketching baseline (Theorem~\ref{thm:main}) confirms that the finite-precision term remains lower order as long as $s \cdot u \ll \varepsilon$. Mixed precision and quantization are both precision-placement mechanisms, but quantization adds calibration and clipping error; the same local perturbation framework applies to both, provided the quantized tensor is modeled as $X + \Delta X$, where $\Delta X$ is controlled not only by unit roundoff but also by scale, zero-point, range selection, and saturation.
 
-Several directions remain open. First, the current experiments use small problem sizes ($n \leq 256$, $d \leq 64$); scaling to realistic transformer dimensions will require either GPU acceleration or the JAX backend scaffold already present in the repository. Second, FP8 policies are reported only under an explicit quantization model; a more complete treatment would include hardware-specific scaling and dequantization. Third, the phase-diagram analogy from Decelle et al.~\autocite{DecelleEtAl2011} suggests mapping not only average error but also regime changes: when does low-precision logit storage remain harmless, when does low-precision softmax begin to amplify, and when does no practical low-precision policy preserve the reference behavior? The current data already hints at these transitions but does not yet chart them systematically. Fourth, the JAX-focused mixed-precision framework of Graefe and Trimpe~\autocite{GraefeTrimpe2025} provides a natural implementation path for the safe/unsafe policy distinctions identified here. We note that the current JAX backend in the repository maps PyTorch fp8 dtypes to JAX float16, so JAX-based fp8 experiments would require a dedicated quantization path and should not be compared directly with PyTorch fp8 results.
+Several directions remain open. First, the current experiments use small problem sizes ($n \leq 256$, $d \leq 64$); scaling to realistic transformer dimensions will require either GPU acceleration or the JAX backend scaffold already present in the repository. Second, FP8 policies are reported only under an explicit quantization model; a more complete treatment would include hardware-specific scaling and dequantization. Third, the phase-diagram analogy from Decelle et al.~\autocite{DecelleEtAl2011} suggests mapping not only average error but also regime changes: when does low-precision logit storage remain harmless, when does low-precision softmax begin to amplify, and when does no practical low-precision policy preserve the reference behavior? The current data already hints at these transitions but does not yet chart them systematically. Fourth, the JAX-focused mixed-precision framework of Graefe and Trimpe~\autocite{GraefeTrimpe2025} provides a natural implementation path for the safe/unsafe policy distinctions identified here. We note that the current JAX backend in the repository maps PyTorch fp8 dtypes to JAX float16, so JAX-based fp8 experiments would require a dedicated quantization path and should not be compared directly with PyTorch fp8 results. Fifth, the Ising magnetization experiment validates the training pipeline but does not yet expose a learnability transition; a masked-spin variant, where the model must infer $|m(X)|$ from partial observations, would make localized attention more advantageous and increase the sensitivity of training dynamics to precision and sketch noise.
 
 On the analytical side, the $\sqrt{n}$ bound on $\|\Sigma(\widehat{L})\|_2$ is likely loose for near-doubly-stochastic attention matrices; a refined bound that exploits the concentration of softmax rows could tighten the value-perturbation term. The logit-perturbation term could similarly be refined by replacing the worst-case $\|V\|_2$ with an average-case or data-dependent quantity.

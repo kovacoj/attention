@@ -27,6 +27,9 @@ uv run python -m src --experiment residual-stack --data-source transformer --dep
 # Attention entropy transition with quantization policies
 python3 src/temperature_experiment.py --output results/attention_temperature_sweep.dev.csv
 
+# Ising magnetization learnability transition
+python3 src/ising_experiment.py --output results/ising_learning_transition.dev.csv
+
 # Sketching baseline
 uv run python -m src --experiment sketch --output results/attention_sweep.csv
 
@@ -56,6 +59,7 @@ Current experiment tracks:
 - `precision-placement`: exact attention with explicit storage / accumulation / logit / softmax / value policies.
 - `residual-stack`: repeated self-attention residual steps for simple depth-propagation experiments.
 - `temperature`: inverse-temperature sweep across the attention entropy transition, including int8 quantization policies.
+- `ising`: Ising magnetization learnability-transition experiment with precision/sketch training policies.
 - `sketch`: the older sketch-based baseline retained for comparison.
 - `random-features`: Performer-style approximation experiments.
 
