@@ -1,0 +1,10 @@
+policy,base_policy,sketch_dim,correction_period,n_seeds,final_train_acc,final_test_acc,memorization_step,grokking_step,grokking_delay,memorized,grokked
+bf16_safe,bf16_safe,,,2,1.000,1.000,3000,3000,0,1.0,1.0
+fp16_safe,fp16_safe,,,2,1.000,1.000,3000,3100,100,1.0,1.0
+fp32,fp32,,,2,1.000,1.000,2900,3000,100,1.0,1.0
+int8_logits_dynamic,int8_logits_dynamic,,,2,0.985,0.973,1300,1400,100,1.0,1.0
+int8_qkv_dynamic,int8_qkv_dynamic,,,2,0.014,0.008,-1,-1,-1,0.0,0.0
+sketch_16,sketch_16,16,,1,0.037,0.052,-1,-1,-1,0.0,0.0
+sketch_4,sketch_4,4,,2,0.356,0.052,-1,-1,-1,0.0,0.0
+sketch_4_periodic_fp32_correction,sketch_4,4,10,2,0.355,0.050,-1,-1,-1,0.0,0.0
+sketch_8,sketch_8,8,,1,0.037,0.052,-1,-1,-1,0.0,0.0

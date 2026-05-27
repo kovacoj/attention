@@ -27,14 +27,6 @@ uv run python -m src --experiment residual-stack --data-source transformer --dep
 # Attention entropy transition with quantization policies
 python3 src/temperature_experiment.py --output results/attention_temperature_sweep.dev.csv
 
-# Ising magnetization learnability transition
-python3 src/ising_experiment.py --output results/ising_learning_transition.dev.csv
-
-# Ising training-barrier diagnostics and Kalman-style correction sweep
-python3 src/ising_barrier_experiment.py \
-  --output-diagnostics results/ising_barrier_diagnostics.dev.csv \
-  --output-corrections results/ising_correction_sweep.dev.csv
-
 # Grokking transition on modular addition
 python3 src/grokking_experiment.py --output results/grokking_transition.dev.csv
 
@@ -70,8 +62,6 @@ Current experiment tracks:
 - `precision-placement`: exact attention with explicit storage / accumulation / logit / softmax / value policies.
 - `residual-stack`: repeated self-attention residual steps for simple depth-propagation experiments.
 - `temperature`: inverse-temperature sweep across the attention entropy transition, including int8 quantization policies.
-- `ising`: Ising magnetization learnability-transition experiment with precision/sketch training policies.
-- `ising-barrier`: Gradient-barrier diagnostics and Kalman-style predictor--corrector correction schedule for the masked Ising task.
 - `grokking`: Grokking transition on modular addition. Studies whether mixed precision and RandNLA sketching shift, delay, prevent, or regularize grokking.
 - `sketch`: the older sketch-based baseline retained for comparison.
 - `random-features`: Performer-style approximation experiments.

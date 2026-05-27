@@ -87,12 +87,15 @@ class _GrokBlock(nn.Module):
         super().__init__()
         self.n_heads = n_heads
         self.d_head = d_head
+        self.max_sketch_dim = 16
 
         self.q_proj = nn.Linear(d_model, d_model, bias=False)
         self.k_proj = nn.Linear(d_model, d_model, bias=False)
         self.v_proj = nn.Linear(d_model, d_model, bias=False)
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
         self.attn_norm = nn.LayerNorm(d_model)
+
+        self.register_buffer("sketch_base", torch.randn(d_head, self.max_sketch_dim))
 
         self.mlp = nn.Sequential(
             nn.Linear(d_model, mlp_hidden),
@@ -140,7 +143,9 @@ class _GrokBlock(nn.Module):
         v = v.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
 
         if sketch_dim is not None and precision_policy.startswith("sketch"):
-            S = torch.randn(self.d_head, sketch_dim, dtype=q.dtype, device=q.device) / math.sqrt(sketch_dim)
+            if sketch_dim > self.max_sketch_dim:
+                raise ValueError(f"sketch_dim={sketch_dim} exceeds max_sketch_dim={self.max_sketch_dim}")
+            S = self.sketch_base[:, :sketch_dim].to(dtype=q.dtype, device=q.device) / math.sqrt(sketch_dim)
             q_s = q @ S
             k_s = k @ S
             logits = (q_s @ k_s.transpose(-1, -2)) / math.sqrt(self.d_head)
