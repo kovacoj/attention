@@ -69,12 +69,27 @@ def _checkerboard_sweep(
     return grid
 
 
-def grids_to_tokens(grids: torch.Tensor) -> torch.Tensor:
+def apply_mask(
+    grids: torch.Tensor, mask_prob: float, *, generator: torch.Generator
+) -> tuple[torch.Tensor, torch.Tensor]:
+    B, L, _ = grids.shape
+    masks = torch.bernoulli(
+        torch.full((B, L, L), mask_prob, device=grids.device), generator=generator
+    )
+    masked_grids = grids * masks
+    return masked_grids, masks
+
+
+def grids_to_tokens(grids: torch.Tensor, masks: torch.Tensor | None = None) -> torch.Tensor:
     B, L, _ = grids.shape
     row_coords = torch.linspace(-1, 1, L, device=grids.device, dtype=grids.dtype)
     col_coords = torch.linspace(-1, 1, L, device=grids.device, dtype=grids.dtype)
     row_grid, col_grid = torch.meshgrid(row_coords, col_coords, indexing="ij")
     row_flat = row_grid.reshape(1, L * L, 1).expand(B, -1, -1)
     col_flat = col_grid.reshape(1, L * L, 1).expand(B, -1, -1)
+    if masks is not None:
+        masked_spins = (grids * masks).reshape(B, L * L, 1)
+        mask_flat = masks.reshape(B, L * L, 1)
+        return torch.cat([masked_spins, mask_flat, row_flat, col_flat], dim=-1)
     spin_flat = grids.reshape(B, L * L, 1)
     return torch.cat([spin_flat, row_flat, col_flat], dim=-1)

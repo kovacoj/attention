@@ -488,37 +488,74 @@ Each lattice site is treated as a token containing the spin value and its normal
 
 This task is intentionally simple: a full model could compute magnetization by averaging. Its purpose is diagnostic rather than architectural. It gives a controlled setting in which microscopic spins must be aggregated into a macroscopic order parameter, while the data distribution itself changes sharply near the physical critical temperature.
 
-We compare full-precision training, low-precision training from scratch, RandNLA-sketched attention training from scratch, and post-training compression of a full-precision model. The hypothesis is that post-training compression can preserve a learned high-margin solution, while training with too much numerical or randomized approximation error from the beginning can prevent the attention layer from forming a useful global aggregation pattern.
+\subsubsection{Sanity check: full observation}
+
+When all spins are visible, every precision and sketch policy succeeds. Table~\ref{tab:ising-learning} reports the result: all runs achieve $R^2\ge 0.97$, and the learned attention remains uniformly diffuse ($H_{\mathrm{attn}}/\log N\approx 1.0$, $M_{\mathrm{attn}}\approx 1/N$). The target can be recovered by global averaging, so no policy fails. Because the unmasked task is solved by high-entropy uniform attention, any subsequent failure on a masked variant can be attributed to the harder inference problem rather than an implementation bug.
 
 \begin{table}[ht]
 \centering
-\caption{Ising magnetization learning-transition experiment. Target is $|m(X)|$ for $L=12$ Ising configurations. Success means $R^2\ge 0.90$ on the test set. The full sweep is committed in \texttt{results/ising\_learning\_transition.dev.csv}.}
+\caption{Unmasked Ising magnetization. All policies succeed ($R^2\ge 0.97$). The learned attention is uniformly diffuse, confirming that the task requires only global averaging.}
 \label{tab:ising-learning}
 \small
-\begin{tabular}{llrrrr}
+\begin{tabular}{llrrr}
 \toprule
-Train policy & Eval policy & Test MSE & Test MAE & $R^2$ & Success \\
+Train policy & Eval policy & Test MSE & $R^2$ & Success \\
 \midrule
-\texttt{fp32} & \texttt{fp32}             & 2.8e-3 & 4.3e-2 & 0.976 & 1 \\
-\texttt{bf16\_safe} & \texttt{bf16\_safe} & 2.8e-3 & 4.3e-2 & 0.976 & 1 \\
-\texttt{fp16\_safe} & \texttt{fp16\_safe} & 2.8e-3 & 4.3e-2 & 0.975 & 1 \\
-\texttt{int8\_qkv\_dyn} & \texttt{int8\_qkv\_dyn} & 2.9e-3 & 4.4e-2 & 0.975 & 1 \\
-\texttt{int8\_logits\_dyn} & \texttt{int8\_logits\_dyn} & 2.8e-3 & 4.3e-2 & 0.976 & 1 \\
-\texttt{sketch\_4} & \texttt{sketch\_4}   & 2.7e-3 & 4.3e-2 & 0.977 & 1 \\
-\texttt{sketch\_8} & \texttt{sketch\_8}   & 2.9e-3 & 4.3e-2 & 0.975 & 1 \\
-\texttt{sketch\_16} & \texttt{sketch\_16}  & 3.0e-3 & 4.3e-2 & 0.974 & 1 \\
+\texttt{fp32} & \texttt{fp32}             & 2.8e-3 & 0.976 & 1 \\
+\texttt{fp16\_safe} & \texttt{fp16\_safe} & 2.8e-3 & 0.975 & 1 \\
+\texttt{int8\_qkv\_dyn} & \texttt{int8\_qkv\_dyn} & 2.9e-3 & 0.975 & 1 \\
+\texttt{sketch\_4} & \texttt{sketch\_4}   & 2.7e-3 & 0.977 & 1 \\
+\texttt{sketch\_16} & \texttt{sketch\_16}  & 3.0e-3 & 0.974 & 1 \\
 \midrule
-\texttt{fp32} & \texttt{bf16\_safe\_eval} & 3.8e-3 & 5.0e-2 & 0.967 & 1 \\
-\texttt{fp32} & \texttt{int8\_logits\_dyn\_eval} & 3.8e-3 & 5.0e-2 & 0.967 & 1 \\
-\texttt{fp32} & \texttt{sketch\_4\_eval} & 3.8e-3 & 5.0e-2 & 0.967 & 1 \\
-\texttt{fp32} & \texttt{sketch\_16\_eval} & 3.8e-3 & 5.0e-2 & 0.967 & 1 \\
+\texttt{fp32} & \texttt{fp16\_safe\_eval} & 3.8e-3 & 0.967 & 1 \\
+\texttt{fp32} & \texttt{sketch\_4\_eval}  & 3.8e-3 & 0.967 & 1 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-In this small diagnostic setting, all policies learn the magnetization task: every training run achieves $R^2\ge 0.97$ and the success rate is $100\%$ across all precision and sketch configurations. Post-training compression of the full-precision model yields a small degradation ($R^2\approx 0.967$) but remains well above the success threshold. The attention matrices are uniformly diffuse ($H_{\mathrm{attn}}/\log N\approx 1.0$, $M_{\mathrm{attn}}\approx 1/N$), consistent with the model learning a global averaging strategy that does not require sharp, localized attention.
+\subsubsection{Masked-spin magnetization prediction}
 
-This indicates that the task is still too easy to expose a sharp learnability transition. The experiment nevertheless validates the pipeline and suggests that a harder variant---such as masked-spin magnetization prediction, where the model must infer the macroscopic order from partial microscopic evidence---is needed to reveal the hypothesized training barrier. Such a variant would make localized attention more advantageous and increase the sensitivity of the training dynamics to precision and sketch noise.
+To expose a learnability barrier, we randomly mask each spin with probability $1-p$. The model receives
+\[
+    \widetilde X_{ij} = M_{ij}\, X_{ij},
+    \qquad
+    M_{ij}\sim\mathrm{Bernoulli}(p),
+\]
+and each token encodes $[\widetilde s_{ij},\; M_{ij},\; \mathrm{row}_{ij},\; \mathrm{col}_{ij}]$, so the model can distinguish ``masked'' from ``physical spin zero.'' The target remains $y=|m(X)|$, computed from the \emph{full} configuration.
+
+We evaluate separately near the critical region $T\in[2.1,2.5]$, where configurations fluctuate most and the inference problem is hardest. Success requires $R^2_{\text{near }T_c}\ge 0.80$ or $\mathrm{MAE}_{\text{near }T_c}\le 0.08$.
+
+\begin{table}[ht]
+\centering
+\caption{Masked Ising magnetization prediction ($L=12$, averaged over 2 seeds). $R^2_{T_c}$ and $\mathrm{MAE}_{T_c}$ are evaluated near the critical region. The full sweep is committed in \texttt{results/ising\_masked\_transition.dev.csv}.}
+\label{tab:ising-masked}
+\small
+\begin{tabular}{cllrrrr}
+\toprule
+$p$ & Train & Eval & $R^2_{\text{all}}$ & $R^2_{T_c}$ & $\mathrm{MAE}_{T_c}$ & Succ \\
+\midrule
+0.8 & \texttt{fp32} & \texttt{fp32}       & 0.967 & 0.935 & 0.047 & 1 \\
+0.8 & \texttt{fp16\_safe} & \texttt{fp16\_safe} & 0.968 & 0.936 & 0.046 & 1 \\
+0.8 & \texttt{sketch\_4} & \texttt{sketch\_4}  & 0.968 & 0.924 & 0.051 & 1 \\
+\midrule
+0.4 & \texttt{fp32} & \texttt{fp32}       & 0.941 & 0.895 & 0.060 & 1 \\
+0.4 & \texttt{fp16\_safe} & \texttt{fp16\_safe} & 0.940 & 0.895 & 0.060 & 1 \\
+0.4 & \texttt{sketch\_4} & \texttt{sketch\_4}  & 0.934 & 0.882 & 0.061 & 1 \\
+\midrule
+0.2 & \texttt{fp32} & \texttt{fp32}       & 0.874 & 0.778 & 0.085 & 0 \\
+0.2 & \texttt{sketch\_4} & \texttt{sketch\_4}  & 0.892 & 0.814 & 0.080 & 1 \\
+0.2 & \texttt{fp32} & \texttt{sketch\_4\_eval} & 0.868 & 0.733 & 0.100 & 0 \\
+\midrule
+0.1 & \texttt{fp32} & \texttt{fp32}       & 0.769 & 0.576 & 0.111 & 0 \\
+0.1 & \texttt{sketch\_4} & \texttt{sketch\_4}  & 0.790 & 0.580 & 0.116 & 0 \\
+0.1 & \texttt{fp32} & \texttt{sketch\_4\_eval} & 0.754 & 0.501 & 0.135 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:ising-masked} reveals a finite-size learnability crossover. At $p=0.8$ and $p=0.4$, all policies succeed; the task is still easy enough that even aggressive sketching preserves the global aggregation. At $p=0.2$, a barrier appears: the fp32 model trained from scratch achieves $R^2_{T_c}=0.78$, just below the success threshold, while \texttt{sketch\_4} trained from scratch reaches $R^2_{T_c}=0.81$ and succeeds. Paradoxically, evaluating the trained fp32 model \emph{under} sketch compression (\texttt{sketch\_4\_eval}) drops $R^2_{T_c}$ to $0.73$, worse than training with the sketch from the beginning. At $p=0.1$, all policies fail near $T_c$; the information deficit is too large for any attention policy to overcome.
+
+The $p=0.2$ result is the clearest evidence of a learnability barrier: the same sketch approximation that harms inference when applied to a pretrained model can \emph{help} training when present from the start, perhaps because the randomized perturbation acts as a regularizer that prevents the optimizer from settling into a brittle, overfitted attention pattern. This is consistent with the wider observation that noise during training can improve generalization in difficult regimes. The barrier is not a thermodynamic phase transition---it is a finite-size crossover in training success---but it has the same qualitative structure: a sharp change in learnability as a control parameter (mask probability) crosses a threshold.
 
 \subsection{A Stress-Test Baseline}
 
@@ -574,6 +611,6 @@ Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\m
 
 The main contribution of this report is the precision-placement decomposition of Proposition~\ref{prop:local-perturbation} and its empirical validation: low-precision softmax is the clearest failure mode in exact attention, while low-precision storage of $Q,K,V$ with fp32 accumulation is typically safe. The sketching baseline (Theorem~\ref{thm:main}) confirms that the finite-precision term remains lower order as long as $s \cdot u \ll \varepsilon$. Mixed precision and quantization are both precision-placement mechanisms, but quantization adds calibration and clipping error; the same local perturbation framework applies to both, provided the quantized tensor is modeled as $X + \Delta X$, where $\Delta X$ is controlled not only by unit roundoff but also by scale, zero-point, range selection, and saturation.
 
-Several directions remain open. First, the current experiments use small problem sizes ($n \leq 256$, $d \leq 64$); scaling to realistic transformer dimensions will require either GPU acceleration or the JAX backend scaffold already present in the repository. Second, FP8 policies are reported only under an explicit quantization model; a more complete treatment would include hardware-specific scaling and dequantization. Third, the phase-diagram analogy from Decelle et al.~\autocite{DecelleEtAl2011} suggests mapping not only average error but also regime changes: when does low-precision logit storage remain harmless, when does low-precision softmax begin to amplify, and when does no practical low-precision policy preserve the reference behavior? The current data already hints at these transitions but does not yet chart them systematically. Fourth, the JAX-focused mixed-precision framework of Graefe and Trimpe~\autocite{GraefeTrimpe2025} provides a natural implementation path for the safe/unsafe policy distinctions identified here. We note that the current JAX backend in the repository maps PyTorch fp8 dtypes to JAX float16, so JAX-based fp8 experiments would require a dedicated quantization path and should not be compared directly with PyTorch fp8 results. Fifth, the Ising magnetization experiment validates the training pipeline but does not yet expose a learnability transition; a masked-spin variant, where the model must infer $|m(X)|$ from partial observations, would make localized attention more advantageous and increase the sensitivity of training dynamics to precision and sketch noise.
+Several directions remain open. First, the current experiments use small problem sizes ($n \leq 256$, $d \leq 64$); scaling to realistic transformer dimensions will require either GPU acceleration or the JAX backend scaffold already present in the repository. Second, FP8 policies are reported only under an explicit quantization model; a more complete treatment would include hardware-specific scaling and dequantization. Third, the phase-diagram analogy from Decelle et al.~\autocite{DecelleEtAl2011} suggests mapping not only average error but also regime changes: when does low-precision logit storage remain harmless, when does low-precision softmax begin to amplify, and when does no practical low-precision policy preserve the reference behavior? The current data already hints at these transitions but does not yet chart them systematically. Fourth, the JAX-focused mixed-precision framework of Graefe and Trimpe~\autocite{GraefeTrimpe2025} provides a natural implementation path for the safe/unsafe policy distinctions identified here. We note that the current JAX backend in the repository maps PyTorch fp8 dtypes to JAX float16, so JAX-based fp8 experiments would require a dedicated quantization path and should not be compared directly with PyTorch fp8 results. Fifth, the masked Ising experiment reveals a finite-size learnability crossover at $p\approx 0.2$: below this mask probability, no policy can reliably predict the magnetization near $T_c$, while above it, all policies succeed. The sketch-trained model at $p=0.2$ succeeds where the fp32-trained model evaluated under sketch compression fails, suggesting a training-time regularization effect. A more systematic sweep of mask probabilities and model depths would clarify whether this crossover sharpens into a true threshold.
 
 On the analytical side, the $\sqrt{n}$ bound on $\|\Sigma(\widehat{L})\|_2$ is likely loose for near-doubly-stochastic attention matrices; a refined bound that exploits the concentration of softmax rows could tighten the value-perturbation term. The logit-perturbation term could similarly be refined by replacing the worst-case $\|V\|_2$ with an average-case or data-dependent quantity.

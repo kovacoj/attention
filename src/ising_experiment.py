@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-from ising_data import generate_ising_dataset, grids_to_tokens
+from ising_data import apply_mask, generate_ising_dataset, grids_to_tokens
 from ising_model import TinyAttentionMagnetizationRegressor
 
 
@@ -19,14 +19,18 @@ class IsingLearningResult:
     L: int
     n_tokens: int
     seed: int
+    mask_prob: float
     train_policy: str
     eval_policy: str
     sketch_dim: int | None
     epochs: int
     train_loss: float
-    test_mse: float
-    test_mae: float
-    test_r2: float
+    test_mse_all: float
+    test_mae_all: float
+    test_r2_all: float
+    test_mse_near_tc: float
+    test_mae_near_tc: float
+    test_r2_near_tc: float
     success: int
     attn_entropy_norm: float
     attn_mean_max_mass: float
@@ -59,6 +63,34 @@ def compute_attention_metrics(weights: torch.Tensor) -> tuple[float, float]:
     return norm_entropy, mean_max
 
 
+def build_masked_data(
+    L: int,
+    temperatures: list[float],
+    samples_per_temperature: int,
+    mask_prob: float,
+    seed: int,
+    device: torch.device,
+):
+    torch.manual_seed(seed)
+    grids, targets, temps = generate_ising_dataset(
+        L, temperatures, samples_per_temperature, seed=seed, device=device
+    )
+    gen = torch.Generator(device="cpu").manual_seed(seed + 5000)
+    if mask_prob < 1.0:
+        masks_cpu = torch.bernoulli(
+            torch.full(grids.shape, mask_prob), generator=gen
+        )
+        masks = masks_cpu.to(device)
+        masked_grids = grids * masks
+        tokens = grids_to_tokens(masked_grids, masks).to(torch.float32)
+    else:
+        tokens = grids_to_tokens(grids).to(torch.float32)
+        masks = None
+
+    targets_f = targets.to(torch.float32)
+    return tokens, targets_f, temps
+
+
 def train_one(
     L: int,
     d_model: int,
@@ -72,13 +104,14 @@ def train_one(
     device: torch.device,
     temperatures: list[float],
     samples_per_temperature: int,
+    mask_prob: float,
 ) -> tuple[TinyAttentionMagnetizationRegressor, dict, float]:
     torch.manual_seed(seed)
-    grids, targets, temps = generate_ising_dataset(
-        L, temperatures, samples_per_temperature, seed=seed, device=device
+    tokens, targets_f, temps = build_masked_data(
+        L, temperatures, samples_per_temperature, mask_prob, seed, device
     )
-    tokens = grids_to_tokens(grids).to(torch.float32)
-    targets_f = targets.to(torch.float32)
+
+    input_dim = 4 if mask_prob < 1.0 else 3
 
     n_total = tokens.shape[0]
     n_train = int(0.8 * n_total)
@@ -92,10 +125,12 @@ def train_one(
     test_targets = targets_f[test_idx]
     test_temps = temps[test_idx]
 
+    near_tc = (test_temps >= 2.1) & (test_temps <= 2.5)
     low_mask = test_temps < 2.0
     high_mask = test_temps > 2.5
 
     model = TinyAttentionMagnetizationRegressor(
+        input_dim=input_dim,
         d_model=d_model,
         depth=depth,
         use_cls=True,
@@ -135,10 +170,20 @@ def train_one(
         if weights is not None:
             weights = weights.cpu()
 
-    test_mse = ((pred - test_targets) ** 2).mean().item()
-    test_mae = (pred - test_targets).abs().mean().item()
-    test_r2 = compute_r2(pred, test_targets)
-    success = 1 if test_r2 >= 0.90 else 0
+    test_mse_all = ((pred - test_targets) ** 2).mean().item()
+    test_mae_all = (pred - test_targets).abs().mean().item()
+    test_r2_all = compute_r2(pred, test_targets)
+
+    if near_tc.any():
+        test_mse_tc = ((pred[near_tc] - test_targets[near_tc]) ** 2).mean().item()
+        test_mae_tc = (pred[near_tc] - test_targets[near_tc]).abs().mean().item()
+        test_r2_tc = compute_r2(pred[near_tc], test_targets[near_tc])
+    else:
+        test_mse_tc = test_mse_all
+        test_mae_tc = test_mae_all
+        test_r2_tc = test_r2_all
+
+    success = 1 if test_r2_tc >= 0.80 or test_mae_tc <= 0.08 else 0
 
     attn_ent, attn_mass = 0.0, 1.0
     if weights is not None:
@@ -149,9 +194,12 @@ def train_one(
 
     metrics = dict(
         train_loss=final_loss,
-        test_mse=test_mse,
-        test_mae=test_mae,
-        test_r2=test_r2,
+        test_mse_all=test_mse_all,
+        test_mae_all=test_mae_all,
+        test_r2_all=test_r2_all,
+        test_mse_near_tc=test_mse_tc,
+        test_mae_near_tc=test_mae_tc,
+        test_r2_near_tc=test_r2_tc,
         success=success,
         attn_entropy_norm=attn_ent,
         attn_mean_max_mass=attn_mass,
@@ -167,14 +215,13 @@ def evaluate_with_policy(
     L: int,
     temperatures: list[float],
     samples_per_temperature: int,
+    mask_prob: float,
     seed: int,
     device: torch.device,
 ) -> dict:
-    grids, targets, temps = generate_ising_dataset(
-        L, temperatures, samples_per_temperature, seed=seed + 10000, device=device
+    tokens, targets_f, temps = build_masked_data(
+        L, temperatures, samples_per_temperature, mask_prob, seed + 10000, device
     )
-    tokens = grids_to_tokens(grids).to(torch.float32)
-    targets_f = targets.to(torch.float32)
 
     original_policy = model.precision_policy
     model.precision_policy = eval_policy
@@ -186,24 +233,39 @@ def evaluate_with_policy(
             weights = weights.cpu()
     model.precision_policy = original_policy
 
-    test_mse = ((pred - targets_f) ** 2).mean().item()
-    test_mae = (pred - targets_f).abs().mean().item()
-    test_r2 = compute_r2(pred, targets_f)
-    success = 1 if test_r2 >= 0.90 else 0
+    test_mse_all = ((pred - targets_f) ** 2).mean().item()
+    test_mae_all = (pred - targets_f).abs().mean().item()
+    test_r2_all = compute_r2(pred, targets_f)
+
+    near_tc = (temps >= 2.1) & (temps <= 2.5)
+    low_mask = temps < 2.0
+    high_mask = temps > 2.5
+
+    if near_tc.any():
+        test_mse_tc = ((pred[near_tc] - targets_f[near_tc]) ** 2).mean().item()
+        test_mae_tc = (pred[near_tc] - targets_f[near_tc]).abs().mean().item()
+        test_r2_tc = compute_r2(pred[near_tc], targets_f[near_tc])
+    else:
+        test_mse_tc = test_mse_all
+        test_mae_tc = test_mae_all
+        test_r2_tc = test_r2_all
+
+    success = 1 if test_r2_tc >= 0.80 or test_mae_tc <= 0.08 else 0
 
     attn_ent, attn_mass = 0.0, 1.0
     if weights is not None:
         attn_ent, attn_mass = compute_attention_metrics(weights)
 
-    low_mask = temps < 2.0
-    high_mask = temps > 2.5
     m_low = float(targets_f[low_mask].mean()) if low_mask.any() else 0.0
     m_high = float(targets_f[high_mask].mean()) if high_mask.any() else 0.0
 
     return dict(
-        test_mse=test_mse,
-        test_mae=test_mae,
-        test_r2=test_r2,
+        test_mse_all=test_mse_all,
+        test_mae_all=test_mae_all,
+        test_r2_all=test_r2_all,
+        test_mse_near_tc=test_mse_tc,
+        test_mae_near_tc=test_mae_tc,
+        test_r2_near_tc=test_r2_tc,
         success=success,
         attn_entropy_norm=attn_ent,
         attn_mean_max_mass=attn_mass,
@@ -213,17 +275,18 @@ def evaluate_with_policy(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ising learnability transition experiment")
-    parser.add_argument("--output", type=Path, default=Path("results/ising_learning_transition.dev.csv"))
+    parser = argparse.ArgumentParser(description="Ising masked learnability transition experiment")
+    parser.add_argument("--output", type=Path, default=Path("results/ising_masked_transition.dev.csv"))
     parser.add_argument("--L", type=int, default=12)
     parser.add_argument("--samples", type=int, default=128)
-    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--d-model", type=int, default=32)
     parser.add_argument("--depth", type=int, default=1)
-    parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
+    parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1])
     parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--mask-probs", type=float, nargs="+", default=[1.0, 0.8, 0.4, 0.2, 0.1])
     args = parser.parse_args()
 
     device = choose_device(args.device)
@@ -233,94 +296,99 @@ def main() -> None:
 
     train_policies = [
         ("fp32", None),
-        ("bf16_safe", None),
         ("fp16_safe", None),
         ("int8_qkv_dynamic", None),
-        ("int8_logits_dynamic", None),
         ("sketch_4", 4),
-        ("sketch_8", 8),
         ("sketch_16", 16),
     ]
 
     eval_policies = [
-        ("bf16_safe_eval", None),
         ("fp16_safe_eval", None),
         ("int8_qkv_dynamic_eval", None),
-        ("int8_logits_dynamic_eval", None),
         ("sketch_4_eval", 4),
-        ("sketch_8_eval", 8),
         ("sketch_16_eval", 16),
     ]
 
     results: list[IsingLearningResult] = []
 
-    for seed in args.seeds:
-        for policy_name, sketch_dim in train_policies:
-            print(f"Training: seed={seed} policy={policy_name}")
-            model, metrics, elapsed = train_one(
-                L=L,
-                d_model=args.d_model,
-                depth=args.depth,
-                epochs=args.epochs,
-                batch_size=args.batch_size,
-                lr=args.lr,
-                train_policy=policy_name,
-                sketch_dim=sketch_dim,
-                seed=seed,
-                device=device,
-                temperatures=temperatures,
-                samples_per_temperature=samples_per_temperature,
-            )
-            results.append(
-                IsingLearningResult(
+    for mask_prob in args.mask_probs:
+        for seed in args.seeds:
+            for policy_name, sketch_dim in train_policies:
+                tag = f"mask={mask_prob:.1f} seed={seed} policy={policy_name}"
+                print(f"Training: {tag}")
+                model, metrics, elapsed = train_one(
                     L=L,
-                    n_tokens=L * L,
-                    seed=seed,
-                    train_policy=policy_name,
-                    eval_policy=policy_name,
-                    sketch_dim=sketch_dim,
+                    d_model=args.d_model,
+                    depth=args.depth,
                     epochs=args.epochs,
-                    train_loss=metrics["train_loss"],
-                    test_mse=metrics["test_mse"],
-                    test_mae=metrics["test_mae"],
-                    test_r2=metrics["test_r2"],
-                    success=metrics["success"],
-                    attn_entropy_norm=metrics["attn_entropy_norm"],
-                    attn_mean_max_mass=metrics["attn_mean_max_mass"],
-                    mean_abs_m_low_T=metrics["mean_abs_m_low_T"],
-                    mean_abs_m_high_T=metrics["mean_abs_m_high_T"],
-                    runtime_sec=elapsed,
+                    batch_size=args.batch_size,
+                    lr=args.lr,
+                    train_policy=policy_name,
+                    sketch_dim=sketch_dim,
+                    seed=seed,
+                    device=device,
+                    temperatures=temperatures,
+                    samples_per_temperature=samples_per_temperature,
+                    mask_prob=mask_prob,
                 )
-            )
+                results.append(
+                    IsingLearningResult(
+                        L=L,
+                        n_tokens=L * L,
+                        seed=seed,
+                        mask_prob=mask_prob,
+                        train_policy=policy_name,
+                        eval_policy=policy_name,
+                        sketch_dim=sketch_dim,
+                        epochs=args.epochs,
+                        train_loss=metrics["train_loss"],
+                        test_mse_all=metrics["test_mse_all"],
+                        test_mae_all=metrics["test_mae_all"],
+                        test_r2_all=metrics["test_r2_all"],
+                        test_mse_near_tc=metrics["test_mse_near_tc"],
+                        test_mae_near_tc=metrics["test_mae_near_tc"],
+                        test_r2_near_tc=metrics["test_r2_near_tc"],
+                        success=metrics["success"],
+                        attn_entropy_norm=metrics["attn_entropy_norm"],
+                        attn_mean_max_mass=metrics["attn_mean_max_mass"],
+                        mean_abs_m_low_T=metrics["mean_abs_m_low_T"],
+                        mean_abs_m_high_T=metrics["mean_abs_m_high_T"],
+                        runtime_sec=elapsed,
+                    )
+                )
 
-            if policy_name == "fp32":
-                for eval_name, eval_sketch in eval_policies:
-                    print(f"  Evaluating fp32 model under: {eval_name}")
-                    ev = evaluate_with_policy(
-                        model, eval_name, L, temperatures,
-                        samples_per_temperature, seed, device,
-                    )
-                    results.append(
-                        IsingLearningResult(
-                            L=L,
-                            n_tokens=L * L,
-                            seed=seed,
-                            train_policy="fp32",
-                            eval_policy=eval_name,
-                            sketch_dim=eval_sketch,
-                            epochs=args.epochs,
-                            train_loss=metrics["train_loss"],
-                            test_mse=ev["test_mse"],
-                            test_mae=ev["test_mae"],
-                            test_r2=ev["test_r2"],
-                            success=ev["success"],
-                            attn_entropy_norm=ev["attn_entropy_norm"],
-                            attn_mean_max_mass=ev["attn_mean_max_mass"],
-                            mean_abs_m_low_T=ev["mean_abs_m_low_T"],
-                            mean_abs_m_high_T=ev["mean_abs_m_high_T"],
-                            runtime_sec=elapsed,
+                if policy_name == "fp32":
+                    for eval_name, eval_sketch in eval_policies:
+                        print(f"  Evaluating fp32 model under: {eval_name}")
+                        ev = evaluate_with_policy(
+                            model, eval_name, L, temperatures,
+                            samples_per_temperature, mask_prob, seed, device,
                         )
-                    )
+                        results.append(
+                            IsingLearningResult(
+                                L=L,
+                                n_tokens=L * L,
+                                seed=seed,
+                                mask_prob=mask_prob,
+                                train_policy="fp32",
+                                eval_policy=eval_name,
+                                sketch_dim=eval_sketch,
+                                epochs=args.epochs,
+                                train_loss=metrics["train_loss"],
+                                test_mse_all=ev["test_mse_all"],
+                                test_mae_all=ev["test_mae_all"],
+                                test_r2_all=ev["test_r2_all"],
+                                test_mse_near_tc=ev["test_mse_near_tc"],
+                                test_mae_near_tc=ev["test_mae_near_tc"],
+                                test_r2_near_tc=ev["test_r2_near_tc"],
+                                success=ev["success"],
+                                attn_entropy_norm=ev["attn_entropy_norm"],
+                                attn_mean_max_mass=ev["attn_mean_max_mass"],
+                                mean_abs_m_low_T=ev["mean_abs_m_low_T"],
+                                mean_abs_m_high_T=ev["mean_abs_m_high_T"],
+                                runtime_sec=elapsed,
+                            )
+                        )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="", encoding="utf-8") as fh:
