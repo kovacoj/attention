@@ -173,6 +173,12 @@ python3 src/ising_barrier_experiment.py \
   --output-diagnostics results/ising_barrier_diagnostics.dev.csv \
   --output-corrections results/ising_correction_sweep.dev.csv
 
+# Grokking transition on modular addition
+python3 src/grokking_experiment.py --output results/grokking_transition.dev.csv
+
+# Quick dev run
+python3 src/grokking_experiment.py --steps 2000 --seeds 0 --policies fp32 sketch_4
+
 # Sketching baseline
 uv run python -m src --experiment sketch --output results/attention_sweep.csv
 
@@ -190,7 +196,7 @@ uv run python -m src.plotting results/random_feature_sweep.dev.csv report/figure
 <p><code>make report</code> builds the PDF through the repo&#x27;s Docker/TeX setup.</p>
 <p>The report source lives in <code>report/</code>, experiment code in <code>src/</code>, and committed CSV outputs in <code>results/</code>.</p>
 <p>Current experiment tracks:</p>
-<ul><li><code>precision-placement</code>: exact attention with explicit storage / accumulation / logit / softmax / value policies.</li><li><code>residual-stack</code>: repeated self-attention residual steps for simple depth-propagation experiments.</li><li><code>temperature</code>: inverse-temperature sweep across the attention entropy transition, including int8 quantization policies.</li><li><code>ising</code>: Ising magnetization learnability-transition experiment with precision/sketch training policies.</li><li><code>ising-barrier</code>: Gradient-barrier diagnostics and Kalman-style predictor--corrector correction schedule for the masked Ising task.</li><li><code>sketch</code>: the older sketch-based baseline retained for comparison.</li><li><code>random-features</code>: Performer-style approximation experiments.</li></ul>
+<ul><li><code>precision-placement</code>: exact attention with explicit storage / accumulation / logit / softmax / value policies.</li><li><code>residual-stack</code>: repeated self-attention residual steps for simple depth-propagation experiments.</li><li><code>temperature</code>: inverse-temperature sweep across the attention entropy transition, including int8 quantization policies.</li><li><code>ising</code>: Ising magnetization learnability-transition experiment with precision/sketch training policies.</li><li><code>ising-barrier</code>: Gradient-barrier diagnostics and Kalman-style predictor--corrector correction schedule for the masked Ising task.</li><li><code>grokking</code>: Grokking transition on modular addition. Studies whether mixed precision and RandNLA sketching shift, delay, prevent, or regularize grokking.</li><li><code>sketch</code>: the older sketch-based baseline retained for comparison.</li><li><code>random-features</code>: Performer-style approximation experiments.</li></ul>
 <p>JAX is currently an optional backend scaffold rather than a required dependency. The main verified sweeps in this repo run in PyTorch, while <code>--backend jax</code> is intended as the next experiment path once JAX is installed locally.</p>
     </section>
   </main>
