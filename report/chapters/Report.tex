@@ -4,7 +4,7 @@ Scaled dot-product attention~\autocite{Vaswani2017} is the core computational pr
 
 The relevant stages are: storage of the query, key, and value tensors; the logit product $QK^T$; logit storage; the rowwise softmax; and the final value product. A global dtype comparison---the usual approach---conflates these stages and cannot identify which \emph{locations} are numerically sensitive. This report instead decomposes the attention pipeline and asks, for each stage separately, whether low precision there produces acceptable error.
 
-The analytical core is Proposition~\ref{prop:local-perturbation}, a local perturbation bound for exact attention that separates the effect of logit perturbations (weighted by $\|V\|_2$) from value perturbations (weighted by $\sqrt{n}$ from the row-stochastic spectral norm). This decomposition directly predicts which precision locations are sensitive: logit errors propagate through softmax with unit Lipschitz constant, while value errors propagate with a $\sqrt{n}$ factor that is moderate for the small sequence lengths tested here, but potentially important for long contexts. The sharpest failure mode is therefore low-precision softmax: when $\Sigma$ itself is computed in low precision, the Lipschitz guarantee from Proposition~\ref{prop:softmax-lipschitz} no longer holds, and the effective perturbation of the probability matrix can be much larger than $\|\Delta L\|_{\mathrm{HS}}$.
+The analytical core is Proposition~\ref{prop:local-perturbation}, a local perturbation bound for exact attention that separates the effect of logit perturbations (weighted by $\|V\|_2$) from value perturbations (weighted by $\sqrt{n}$ from the row-stochastic spectral norm). This decomposition directly predicts which precision locations are sensitive: logit errors propagate through softmax with unit Lipschitz constant, while value errors propagate with a $\sqrt{n}$ factor that is moderate for the small sequence lengths tested here, but potentially important for long contexts. Among the floating-point placement policies, low-precision softmax is the clearest failure mode. Under explicit quantization, however, static logit quantization can fail more severely through clipping once the attention temperature moves outside the calibration range.
 
 Sketching-based attention approximations~\autocite{HalkoMartinssonTropp2011, Mahoney2016, WangEtAl2020, XiongEtAl2021, ChoromanskiEtAl2021} are retained as a methodological baseline: they provide a controlled stress test in which the error decomposition can be verified under a known approximation floor. But they are not the main contribution.
 
@@ -280,6 +280,8 @@ Combining the subspace embedding guarantee with the finite-precision error yield
 
 \section{Numerical Experiments}
 
+The experiments are organized in five layers. Section~4.1 studies exact attention under fixed precision-placement policies. Section~4.2 introduces a temperature parameter to expose an entropy-collapse crossover and quantization clipping. Section~4.3 studies how local precision errors accumulate in a toy residual stack. Section~4.4 uses an Ising magnetization task as a training-time sanity check and masked-observation stress test. Section~4.5 returns to sketched attention as an intentionally under-sketched baseline for the error decomposition.
+
 \subsection{Exact Attention Under Precision Policies}
 
 For each precision policy, we evaluate the exact attention pipeline
@@ -428,7 +430,7 @@ Table~\ref{tab:temperature} shows representative rows from the entropy-transitio
 
 The static int8 logit policy tells a different story. At $\beta=0.5$ the logits lie within the calibration range inherited from $\beta=1$, clipping is zero, and errors are small. By $\beta=4$ the rescaled logits $\beta L$ exceed the calibration range for roughly 32\% of entries, $E_P$ exceeds unity, and $R_{\mathrm{flip}}$ reaches 92\%. At $\beta=16$ clipping affects 80\% of entries and the argmax flip rate is 98\%---the quantized attention pattern has almost no overlap with the reference. This is precisely the fragility predicted by the quantization model: once the scale is miscalibrated, clipping introduces large structured errors that the perturbation bound in Proposition~\ref{prop:local-perturbation} does not capture, because $\Delta_{\mathrm{quant}}L$ is no longer small.
 
-The transition experiment thus gives a concrete phase-diagram view of precision placement: low precision is easiest in the diffuse regime and most fragile near concentrated, winner-take-all attention.
+The transition experiment thus gives a concrete phase-diagram view of precision placement: low precision is easiest in the diffuse regime and most fragile near concentrated, winner-take-all attention. This is the clearest phase-diagram behavior in the current report: as $\beta$ drives attention through the entropy-collapse crossover, the fixed int8 calibration range becomes invalid, clipping appears abruptly, and argmax attention decisions fail almost completely.
 
 \subsection{Residual Depth Propagation}
 
@@ -490,7 +492,7 @@ This task is intentionally simple: a full model could compute magnetization by a
 
 \subsubsection{Sanity check: full observation}
 
-When all spins are visible, every precision and sketch policy succeeds. Table~\ref{tab:ising-learning} reports the result: all runs achieve $R^2\ge 0.97$, and the learned attention remains uniformly diffuse ($H_{\mathrm{attn}}/\log N\approx 1.0$, $M_{\mathrm{attn}}\approx 1/N$). The target can be recovered by global averaging, so no policy fails. Because the unmasked task is solved by high-entropy uniform attention, any subsequent failure on a masked variant can be attributed to the harder inference problem rather than an implementation bug.
+When all spins are visible, every precision and sketch policy succeeds. Table~\ref{tab:ising-learning} reports the result: all runs achieve $R^2\ge 0.97$, and the learned attention remains uniformly diffuse ($H_{\mathrm{attn}}/\log N\approx 1.0$, $M_{\mathrm{attn}}\approx 1/N$). The unmasked task is a negative control: it validates the data pipeline and model implementation, but it is too easy to expose a precision-induced learnability barrier because uniform averaging is already sufficient.
 
 \begin{table}[ht]
 \centering
@@ -555,7 +557,109 @@ $p$ & Train & Eval & $R^2_{\text{all}}$ & $R^2_{T_c}$ & $\mathrm{MAE}_{T_c}$ & S
 
 Table~\ref{tab:ising-masked} reveals a finite-size learnability crossover. At $p=0.8$ and $p=0.4$, all policies succeed; the task is still easy enough that even aggressive sketching preserves the global aggregation. At $p=0.2$, a barrier appears: the fp32 model trained from scratch achieves $R^2_{T_c}=0.78$, just below the success threshold, while \texttt{sketch\_4} trained from scratch reaches $R^2_{T_c}=0.81$ and succeeds. Paradoxically, evaluating the trained fp32 model \emph{under} sketch compression (\texttt{sketch\_4\_eval}) drops $R^2_{T_c}$ to $0.73$, worse than training with the sketch from the beginning. At $p=0.1$, all policies fail near $T_c$; the information deficit is too large for any attention policy to overcome.
 
-The $p=0.2$ result is the clearest evidence of a learnability barrier: the same sketch approximation that harms inference when applied to a pretrained model can \emph{help} training when present from the start, perhaps because the randomized perturbation acts as a regularizer that prevents the optimizer from settling into a brittle, overfitted attention pattern. This is consistent with the wider observation that noise during training can improve generalization in difficult regimes. The barrier is not a thermodynamic phase transition---it is a finite-size crossover in training success---but it has the same qualitative structure: a sharp change in learnability as a control parameter (mask probability) crosses a threshold.
+The $p=0.2$ regime is the most suggestive case in the current sweep. The fp32 model trained from scratch falls just below the chosen near-critical success threshold, while \texttt{sketch\_4} trained from scratch crosses it. Conversely, applying the same sketch only at evaluation time hurts the fp32-trained model. This pattern is consistent with a training-time regularization effect, but it should not yet be interpreted as conclusive: the sweep uses only a small number of seeds, and the relevant metrics are close to the success boundary. A denser sweep over mask probabilities and more random seeds is needed to determine whether this becomes a robust learnability transition. The present Ising numbers should be read as a pilot experiment; the next version should estimate success probabilities over more seeds rather than relying on averaged metrics alone.
+
+\subsection{Approximation as a Training Barrier: A Kalman-Style Diagnostic}
+
+The masked Ising experiment suggests that reduced precision and randomized attention approximations should not be studied only as inference-time perturbations. During training, they also perturb the learning signal itself. We therefore add a diagnostic inspired by the predictor--corrector structure of the Extended Kalman Filter. The analogy is not literal: we do not maintain a covariance matrix over neural-network parameters. Instead, we use the full-precision attention step as a high-fidelity reference and the low-precision or sketched attention step as a noisy prediction.
+
+For a fixed batch and fixed parameters, let
+\[
+    g = \nabla_\theta \mathcal L_{\mathrm{fp32}},
+    \qquad
+    \widehat g = \nabla_\theta \mathcal L_{\mathrm{approx}}.
+\]
+We measure the gradient cosine
+\[
+    \frac{\langle g,\widehat g\rangle}
+    {\|g\|_2\|\widehat g\|_2},
+\]
+the relative gradient error
+\[
+    \frac{\|\widehat g-g\|_2}{\|g\|_2},
+\]
+and the update signal-to-noise ratio
+\[
+    \mathrm{SNR}_{\mathrm{update}}
+    =
+    \frac{\|g\|_2}{\|\widehat g-g\|_2}.
+\]
+When this SNR is below one, the numerical or randomized perturbation to the update is larger than the full-precision learning signal. This gives a concrete notion of a training barrier. We also compute the output innovation $\|\widehat y_{\mathrm{approx}}-\widehat y_{\mathrm{fp32}}\|_2$ and the relative output error.
+
+We also test a simple Kalman-style correction schedule: most updates are performed under the approximate policy, but every few batches an fp32 update is inserted. This is a predictor--corrector analogue rather than a full EKF. Its purpose is to test whether occasional high-fidelity corrections help the model cross the approximation-induced training barrier.
+
+\begin{table}[ht]
+\centering
+\caption{Training-barrier diagnostics on masked Ising magnetization ($L=12$, 15 epochs, averaged over 2 seeds). Gradient metrics compare each approximate policy against an fp32 reference on the same probe batch. The full sweep is committed in \texttt{results/ising\_barrier\_diagnostics.dev.csv}.}
+\label{tab:ising-barrier}
+\small
+\begin{tabular}{lrrrrrrr}
+\toprule
+Policy & $p$ & $R^2_{T_c}$ & MAE$_{T_c}$ & Succ & Grad cos & Update SNR & Grad rel err \\
+\midrule
+\texttt{bf16\_safe}        & 0.2 & 0.649 & 0.106 & 0.0 & 1.000 & 1526 & 0.001 \\
+\texttt{fp16\_safe}        & 0.2 & 0.632 & 0.113 & 0.0 & 1.000 & 2128 & 0.000 \\
+\texttt{int8\_logits\_dyn} & 0.2 & 0.671 & 0.112 & 0.0 & 1.000 &   56 & 0.020 \\
+\texttt{int8\_qkv\_dyn}   & 0.2 & 0.607 & 0.115 & 0.0 & 0.583 & 1.23 & 0.811 \\
+\texttt{sketch\_4}         & 0.2 & 0.686 & 0.105 & 0.0 & 0.083 & 0.92 & 1.335 \\
+\texttt{sketch\_8}         & 0.2 & 0.579 & 0.120 & 0.0 & 0.126 & 0.96 & 1.391 \\
+\midrule
+\texttt{bf16\_safe}        & 0.3 & 0.721 & 0.099 & 0.5 & 1.000 & 1367 & 0.001 \\
+\texttt{fp16\_safe}        & 0.3 & 0.761 & 0.090 & 0.0 & 1.000 & 1167 & 0.001 \\
+\texttt{int8\_logits\_dyn} & 0.3 & 0.767 & 0.091 & 0.5 & 1.000 &   62 & 0.023 \\
+\texttt{int8\_qkv\_dyn}   & 0.3 & 0.685 & 0.105 & 0.0 & 0.607 & 1.26 & 0.794 \\
+\texttt{sketch\_4}         & 0.3 & 0.757 & 0.092 & 0.0 & 0.485 & 1.22 & 0.843 \\
+\texttt{sketch\_8}         & 0.3 & 0.742 & 0.096 & 0.0 & 0.240 & 1.42 & 1.221 \\
+\midrule
+\texttt{bf16\_safe}        & 0.4 & 0.803 & 0.083 & 0.5 & 1.000 &  708 & 0.002 \\
+\texttt{fp16\_safe}        & 0.4 & 0.808 & 0.080 & 0.5 & 1.000 &  934 & 0.001 \\
+\texttt{int8\_logits\_dyn} & 0.4 & 0.779 & 0.092 & 0.5 & 1.000 &   49 & 0.022 \\
+\texttt{int8\_qkv\_dyn}   & 0.4 & 0.761 & 0.089 & 0.5 & 0.617 & 1.27 & 0.786 \\
+\texttt{sketch\_4}         & 0.4 & 0.822 & 0.079 & 1.0 & 0.044 & 0.87 & 1.257 \\
+\texttt{sketch\_8}         & 0.4 & 0.799 & 0.084 & 0.5 & 0.838 & 1.36 & 0.872 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:ising-barrier} reports the gradient diagnostics at the final training epoch. The policies separate into two groups. The floating-point policies (\texttt{bf16\_safe}, \texttt{fp16\_safe}, \texttt{int8\_logits\_dyn}) have gradient cosine $\approx 1.0$, update SNR $\gg 1$, and relative gradient error $\leq 0.02$: their approximate gradients are nearly aligned with the fp32 reference. The sketch policies (\texttt{sketch\_4}, \texttt{sketch\_8}) have gradient cosine $\approx 0$--$0.5$, update SNR $\approx 0.9$--$1.4$, and relative gradient error $> 0.8$: the sketch noise is comparable to or larger than the learning signal. The \texttt{int8\_qkv\_dynamic} policy falls between these groups, with cosine $\approx 0.6$ and SNR just above one. Despite the gradient misalignment, \texttt{sketch\_4} at $p=0.4$ achieves $R^2_{T_c}=0.82$ and succeeds, while \texttt{fp16\_safe} at $p=0.3$ with perfectly aligned gradients achieves only $R^2_{T_c}=0.76$. This confirms that gradient alignment is informative about the nature of the approximation error, but does not by itself predict training success: a misaligned gradient can still move the parameters in a useful direction.
+
+\begin{table}[ht]
+\centering
+\caption{Kalman-style full-precision correction schedule ($L=12$, 15 epochs, averaged over 2 seeds). Approximate policies are trained from scratch, with optional fp32 correction steps every five batches. The full sweep is committed in \texttt{results/ising\_correction\_sweep.dev.csv}.}
+\label{tab:ising-correction}
+\small
+\begin{tabular}{lrrrrr}
+\toprule
+Train mode & $p$ & $R^2_{T_c}$ & MAE$_{T_c}$ & Succ & Final grad cos \\
+\midrule
+\texttt{fp32}                                  & 0.2 & 0.634 & 0.113 & 0.0 & 1.000 \\
+\texttt{sketch\_4}                             & 0.2 & 0.650 & 0.108 & 0.0 & $-0.865$ \\
+\texttt{sketch\_4\_periodic\_fp32\_correction} & 0.2 & 0.595 & 0.117 & 0.0 & 0.091 \\
+\texttt{sketch\_8}                             & 0.2 & 0.653 & 0.109 & 0.0 & 0.029 \\
+\texttt{sketch\_8\_periodic\_fp32\_correction} & 0.2 & 0.626 & 0.113 & 0.0 & 0.931 \\
+\texttt{int8\_logits\_dyn}                     & 0.2 & 0.676 & 0.104 & 0.0 & 1.000 \\
+\texttt{int8\_logits\_periodic\_fp32\_correction} & 0.2 & 0.691 & 0.105 & 0.0 & 1.000 \\
+\midrule
+\texttt{fp32}                                  & 0.3 & 0.762 & 0.090 & 0.0 & 1.000 \\
+\texttt{sketch\_4}                             & 0.3 & 0.806 & 0.084 & 0.5 & 0.042 \\
+\texttt{sketch\_4\_periodic\_fp32\_correction} & 0.3 & 0.725 & 0.099 & 0.0 & 0.655 \\
+\texttt{sketch\_8}                             & 0.3 & 0.794 & 0.085 & 0.5 & 0.373 \\
+\texttt{sketch\_8\_periodic\_fp32\_correction} & 0.3 & 0.771 & 0.090 & 0.5 & 0.985 \\
+\texttt{int8\_logits\_dyn}                     & 0.3 & 0.738 & 0.095 & 0.5 & 1.000 \\
+\texttt{int8\_logits\_periodic\_fp32\_correction} & 0.3 & 0.766 & 0.089 & 0.5 & 1.000 \\
+\midrule
+\texttt{fp32}                                  & 0.4 & 0.809 & 0.080 & 0.5 & 1.000 \\
+\texttt{sketch\_4}                             & 0.4 & 0.856 & 0.070 & 1.0 & 0.974 \\
+\texttt{sketch\_4\_periodic\_fp32\_correction} & 0.4 & 0.789 & 0.086 & 0.5 & 0.900 \\
+\texttt{sketch\_8}                             & 0.4 & 0.840 & 0.077 & 1.0 & 0.873 \\
+\texttt{sketch\_8\_periodic\_fp32\_correction} & 0.4 & 0.768 & 0.090 & 0.5 & 0.971 \\
+\texttt{int8\_logits\_dyn}                     & 0.4 & 0.815 & 0.080 & 0.5 & 1.000 \\
+\texttt{int8\_logits\_periodic\_fp32\_correction} & 0.4 & 0.793 & 0.085 & 0.5 & 0.999 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:ising-correction} reports the correction-sweep results. The correction schedule does not substantially improve the sketch policies in this pilot sweep. At $p=0.2$, where all policies fail, adding periodic fp32 corrections to \texttt{sketch\_4} actually hurts ($R^2_{T_c}$ drops from 0.650 to 0.595), though it improves the final gradient cosine from $-0.865$ to $0.091$. For \texttt{sketch\_8}, correction improves the gradient cosine (0.029$\to$0.931) without improving $R^2_{T_c}$. At $p=0.4$, where \texttt{sketch\_4} already succeeds, correction again hurts ($R^2_{T_c}$ drops from 0.856 to 0.789). For the int8 policies, which already have well-aligned gradients, correction produces negligible changes. This suggests that the observed failures are not caused simply by occasional misaligned updates, or that the correction frequency of one-in-five batches is insufficient. The gradient diagnostics nevertheless remain useful because they quantify whether the approximate policy follows the same local learning direction as fp32, and they cleanly separate the floating-point policies (cosine$\approx 1$) from the sketch policies (cosine$\approx 0$).
 
 \subsection{A Stress-Test Baseline}
 
@@ -611,6 +715,8 @@ Three observations stand out. First, for fp32 and fp16, $E_{\mathrm{sk}} / E_{\m
 
 The main contribution of this report is the precision-placement decomposition of Proposition~\ref{prop:local-perturbation} and its empirical validation: low-precision softmax is the clearest failure mode in exact attention, while low-precision storage of $Q,K,V$ with fp32 accumulation is typically safe. The sketching baseline (Theorem~\ref{thm:main}) confirms that the finite-precision term remains lower order as long as $s \cdot u \ll \varepsilon$. Mixed precision and quantization are both precision-placement mechanisms, but quantization adds calibration and clipping error; the same local perturbation framework applies to both, provided the quantized tensor is modeled as $X + \Delta X$, where $\Delta X$ is controlled not only by unit roundoff but also by scale, zero-point, range selection, and saturation.
 
-Several directions remain open. First, the current experiments use small problem sizes ($n \leq 256$, $d \leq 64$); scaling to realistic transformer dimensions will require either GPU acceleration or the JAX backend scaffold already present in the repository. Second, FP8 policies are reported only under an explicit quantization model; a more complete treatment would include hardware-specific scaling and dequantization. Third, the phase-diagram analogy from Decelle et al.~\autocite{DecelleEtAl2011} suggests mapping not only average error but also regime changes: when does low-precision logit storage remain harmless, when does low-precision softmax begin to amplify, and when does no practical low-precision policy preserve the reference behavior? The current data already hints at these transitions but does not yet chart them systematically. Fourth, the JAX-focused mixed-precision framework of Graefe and Trimpe~\autocite{GraefeTrimpe2025} provides a natural implementation path for the safe/unsafe policy distinctions identified here. We note that the current JAX backend in the repository maps PyTorch fp8 dtypes to JAX float16, so JAX-based fp8 experiments would require a dedicated quantization path and should not be compared directly with PyTorch fp8 results. Fifth, the masked Ising experiment reveals a finite-size learnability crossover at $p\approx 0.2$: below this mask probability, no policy can reliably predict the magnetization near $T_c$, while above it, all policies succeed. The sketch-trained model at $p=0.2$ succeeds where the fp32-trained model evaluated under sketch compression fails, suggesting a training-time regularization effect. A more systematic sweep of mask probabilities and model depths would clarify whether this crossover sharpens into a true threshold.
+Several directions remain open. First, the current experiments use small problem sizes ($n \leq 256$, $d \leq 64$); scaling to realistic transformer dimensions will require either GPU acceleration or the JAX backend scaffold already present in the repository. Second, FP8 policies are reported only under an explicit quantization model; a more complete treatment would include hardware-specific scaling and dequantization. Third, the phase-diagram analogy from Decelle et al.~\autocite{DecelleEtAl2011} suggests mapping not only average error but also regime changes: when does low-precision logit storage remain harmless, when does low-precision softmax begin to amplify, and when does no practical low-precision policy preserve the reference behavior? The current data already hints at these transitions but does not yet chart them systematically. Fourth, the JAX-focused mixed-precision framework of Graefe and Trimpe~\autocite{GraefeTrimpe2025} provides a natural implementation path for the safe/unsafe policy distinctions identified here. We note that the current JAX backend in the repository maps PyTorch fp8 dtypes to JAX float16, so JAX-based fp8 experiments would require a dedicated quantization path and should not be compared directly with PyTorch fp8 results. Fifth, the masked Ising experiment suggests a finite-size learnability crossover near $p\approx0.2$: below this mask probability the task becomes difficult near $T_c$, while above it all tested policies succeed. The apparent advantage of training with the sketch from the beginning over applying it only after fp32 training is suggestive of a training-time regularization effect, but it should be checked with more seeds, denser mask probabilities, and larger model variants.
+
+The Ising barrier diagnostics suggest a broader direction: mixed precision and RandNLA should be analyzed not only through forward error, but also through the distortion they introduce into the training signal. A more complete theory would bound the difference between full-precision and approximate gradients, and relate this difference to whether training can cross the entropy-collapse or aggregation transition of the attention layer. The predictor--corrector analogy with Kalman filtering is a useful practical diagnostic: approximate updates can be viewed as noisy predictions, while occasional full-precision updates act as high-fidelity corrections. In the current pilot sweep, the correction schedule does not substantially improve the sketch policies, but the gradient diagnostics cleanly separate floating-point policies (gradient cosine$\approx 1$) from sketch policies (gradient cosine$\approx 0$), confirming that the two classes of approximation distort the learning signal in qualitatively different ways.
 
 On the analytical side, the $\sqrt{n}$ bound on $\|\Sigma(\widehat{L})\|_2$ is likely loose for near-doubly-stochastic attention matrices; a refined bound that exploits the concentration of softmax rows could tighten the value-perturbation term. The logit-perturbation term could similarly be refined by replacing the worst-case $\|V\|_2$ with an average-case or data-dependent quantity.
