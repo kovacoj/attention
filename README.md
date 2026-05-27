@@ -35,6 +35,12 @@ python3 src/ising_barrier_experiment.py \
   --output-diagnostics results/ising_barrier_diagnostics.dev.csv \
   --output-corrections results/ising_correction_sweep.dev.csv
 
+# Grokking transition on modular addition
+python3 src/grokking_experiment.py --output results/grokking_transition.dev.csv
+
+# Quick dev run
+python3 src/grokking_experiment.py --steps 2000 --seeds 0 --policies fp32 sketch_4
+
 # Sketching baseline
 uv run python -m src --experiment sketch --output results/attention_sweep.csv
 
@@ -66,6 +72,7 @@ Current experiment tracks:
 - `temperature`: inverse-temperature sweep across the attention entropy transition, including int8 quantization policies.
 - `ising`: Ising magnetization learnability-transition experiment with precision/sketch training policies.
 - `ising-barrier`: Gradient-barrier diagnostics and Kalman-style predictor--corrector correction schedule for the masked Ising task.
+- `grokking`: Grokking transition on modular addition. Studies whether mixed precision and RandNLA sketching shift, delay, prevent, or regularize grokking.
 - `sketch`: the older sketch-based baseline retained for comparison.
 - `random-features`: Performer-style approximation experiments.
 

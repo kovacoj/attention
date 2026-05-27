@@ -280,7 +280,7 @@ Combining the subspace embedding guarantee with the finite-precision error yield
 
 \section{Numerical Experiments}
 
-The experiments are organized in five layers. Section~4.1 studies exact attention under fixed precision-placement policies. Section~4.2 introduces a temperature parameter to expose an entropy-collapse crossover and quantization clipping. Section~4.3 studies how local precision errors accumulate in a toy residual stack. Section~4.4 uses an Ising magnetization task as a training-time sanity check and masked-observation stress test. Section~4.5 returns to sketched attention as an intentionally under-sketched baseline for the error decomposition.
+The experiments are organized in five layers. Section~4.1 studies exact attention under fixed precision-placement policies. Section~4.2 introduces a temperature parameter to expose an entropy-collapse crossover and quantization clipping. Section~4.3 studies how local precision errors accumulate in a toy residual stack. Section~4.4 uses an Ising magnetization task as a training-time sanity check and masked-observation stress test, and a modular addition grokking experiment as a sharper training-barrier test. Section~4.5 returns to sketched attention as an intentionally under-sketched baseline for the error decomposition.
 
 \subsection{Exact Attention Under Precision Policies}
 
@@ -661,6 +661,57 @@ Train mode & $p$ & $R^2_{T_c}$ & MAE$_{T_c}$ & Succ & Final grad cos \\
 
 Table~\ref{tab:ising-correction} reports the correction-sweep results. The correction schedule does not substantially improve the sketch policies in this pilot sweep. At $p=0.2$, where all policies fail, adding periodic fp32 corrections to \texttt{sketch\_4} actually hurts ($R^2_{T_c}$ drops from 0.650 to 0.595), though it improves the final gradient cosine from $-0.865$ to $0.091$. For \texttt{sketch\_8}, correction improves the gradient cosine (0.029$\to$0.931) without improving $R^2_{T_c}$. At $p=0.4$, where \texttt{sketch\_4} already succeeds, correction again hurts ($R^2_{T_c}$ drops from 0.856 to 0.789). For the int8 policies, which already have well-aligned gradients, correction produces negligible changes. This suggests that the observed failures are not caused simply by occasional misaligned updates, or that the correction frequency of one-in-five batches is insufficient. The gradient diagnostics nevertheless remain useful because they quantify whether the approximate policy follows the same local learning direction as fp32, and they cleanly separate the floating-point policies (cosine$\approx 1$) from the sketch policies (cosine$\approx 0$).
 
+\subsection{Grokking as a Training-Barrier Test}
+
+Grokking provides a cleaner training-time test than unmasked magnetization regression because it separates memorization from generalization. We use modular addition,
+\[
+    (a,b)\mapsto (a+b)\bmod p,
+\]
+with $p=97$ and a random train/test split (40\% train). A small single-head attention model ($d_{\mathrm{model}}=64$, depth $1$, MLP hidden $128$) is trained with AdamW (weight decay $1.0$, learning rate $10^{-3}$) far beyond the point where it fits the training set. The relevant event is not only reaching high training accuracy, but the delayed transition in test accuracy.
+
+For a run, define the memorization step
+\[
+    t_{\mathrm{mem}}=\min\{t:\mathrm{acc}_{\mathrm{train}}(t)\ge0.99\},
+\]
+and the grokking step
+\[
+    t_{\mathrm{grok}}=\min\{t:\mathrm{acc}_{\mathrm{test}}(t)\ge0.95\}.
+\]
+The grokking delay is $t_{\mathrm{grok}}-t_{\mathrm{mem}}$. Approximate attention policies may shift this delay, prevent grokking, or in some regimes act as regularization and accelerate it.
+
+This connects directly to the barrier interpretation. Low precision and RandNLA sketching perturb not only the forward attention map but also the training signal. If the approximate gradient remains aligned with the full-precision gradient, the model can still cross from memorization to generalization. If the approximation dominates the learning signal, grokking may be delayed or prevented.
+
+\begin{table}[ht]
+\centering
+\caption{Pilot grokking experiment on modular addition ($p=97$, 40\% train, averaged over 2 seeds). A value of -- means the threshold was not reached within the run. The full learning curves are committed in \texttt{results/grokking\_transition.dev.csv}.}
+\label{tab:grokking}
+\small
+\begin{tabular}{lrrrrr}
+\toprule
+Policy & Test acc & Train acc & $t_{\mathrm{mem}}$ & $t_{\mathrm{grok}}$ & Grokked \\
+\midrule
+\texttt{fp32}                & 1.000 & 1.000 & 2900 & 3000 & Yes \\
+\texttt{fp16\_safe}          & 1.000 & 1.000 & 3000 & 3100 & Yes \\
+\texttt{bf16\_safe}          & 1.000 & 1.000 & 3000 & 3000 & Yes \\
+\texttt{int8\_logits\_dyn}   & 0.973 & 0.985 & 1300 & 1400 & Yes \\
+\texttt{int8\_qkv\_dyn}      & 0.008 & 0.014 & --   & --   & No \\
+\texttt{sketch\_4}           & 0.052 & 0.356 & --   & --   & No \\
+\texttt{sketch\_4+corr}      & 0.050 & 0.355 & --   & --   & No \\
+\texttt{sketch\_8}           & 1.000 & 1.000 & 2000 & 2000 & Yes \\
+\texttt{sketch\_16}          & 1.000 & 1.000 & 1600 & 1600 & Yes \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:grokking} reports the results. The policies separate into three regimes:
+\begin{enumerate}
+    \item \textbf{Grokking with regularization.} \texttt{int8\_logits\_dynamic} groks at step $\sim$1400, roughly twice as fast as fp32 ($\sim$3000). Dynamic int8 logit quantization acts as a regularizer that suppresses memorizing solutions and favors the generalizing circuit. The same effect appears, more modestly, for \texttt{sketch\_8} and \texttt{sketch\_16}, which grok at steps 2000 and 1600 respectively.
+    \item \textbf{Grokking unchanged.} \texttt{fp16\_safe} and \texttt{bf16\_safe} grok on the same timescale as fp32, consistent with their near-perfect gradient alignment (cosine$\approx 1$) in the Ising barrier diagnostics.
+    \item \textbf{Grokking prevented.} \texttt{int8\_qkv\_dynamic} and \texttt{sketch\_4} fail to grok within 10\,000 steps, with test accuracy stuck at chance level ($\sim$1\%) for int8 QKV and $\sim$5\% for sketch-4. The periodic fp32 correction does not rescue sketch-4, consistent with the Ising correction sweep. The transition from sketch-4 (failure) to sketch-8 (success) is sharp, suggesting a critical sketch dimension below which the learning signal is too distorted to form the generalizing circuit.
+\end{enumerate}
+
+The periodic-correction variants are inspired by the predictor--corrector structure of the Extended Kalman Filter. The analogy is not literal: we do not maintain a covariance matrix over network parameters. Rather, approximate low-precision or sketched updates play the role of noisy prediction steps, while occasional fp32 updates act as high-fidelity corrections. This lets us test whether the learning barrier is caused by accumulated misalignment of approximate updates. In the current pilot, the correction does not help: sketch-4 with periodic fp32 correction still fails, suggesting that the barrier is not caused by occasional misaligned steps but by a systematic distortion of the learning landscape.
+
 \subsection{A Stress-Test Baseline}
 
 The experiments in this subsection probe the decomposition of Theorem~\ref{thm:main} directly. For each combination of parameters $(n, d, s)$ and each precision configuration we compute three logit matrices:
@@ -717,6 +768,8 @@ The main contribution of this report is the precision-placement decomposition of
 
 Several directions remain open. First, the current experiments use small problem sizes ($n \leq 256$, $d \leq 64$); scaling to realistic transformer dimensions will require either GPU acceleration or the JAX backend scaffold already present in the repository. Second, FP8 policies are reported only under an explicit quantization model; a more complete treatment would include hardware-specific scaling and dequantization. Third, the phase-diagram analogy from Decelle et al.~\autocite{DecelleEtAl2011} suggests mapping not only average error but also regime changes: when does low-precision logit storage remain harmless, when does low-precision softmax begin to amplify, and when does no practical low-precision policy preserve the reference behavior? The current data already hints at these transitions but does not yet chart them systematically. Fourth, the JAX-focused mixed-precision framework of Graefe and Trimpe~\autocite{GraefeTrimpe2025} provides a natural implementation path for the safe/unsafe policy distinctions identified here. We note that the current JAX backend in the repository maps PyTorch fp8 dtypes to JAX float16, so JAX-based fp8 experiments would require a dedicated quantization path and should not be compared directly with PyTorch fp8 results. Fifth, the masked Ising experiment suggests a finite-size learnability crossover near $p\approx0.2$: below this mask probability the task becomes difficult near $T_c$, while above it all tested policies succeed. The apparent advantage of training with the sketch from the beginning over applying it only after fp32 training is suggestive of a training-time regularization effect, but it should be checked with more seeds, denser mask probabilities, and larger model variants.
 
-The Ising barrier diagnostics suggest a broader direction: mixed precision and RandNLA should be analyzed not only through forward error, but also through the distortion they introduce into the training signal. A more complete theory would bound the difference between full-precision and approximate gradients, and relate this difference to whether training can cross the entropy-collapse or aggregation transition of the attention layer. The predictor--corrector analogy with Kalman filtering is a useful practical diagnostic: approximate updates can be viewed as noisy predictions, while occasional full-precision updates act as high-fidelity corrections. In the current pilot sweep, the correction schedule does not substantially improve the sketch policies, but the gradient diagnostics cleanly separate floating-point policies (gradient cosine$\approx 1$) from sketch policies (gradient cosine$\approx 0$), confirming that the two classes of approximation distort the learning signal in qualitatively different ways.
+The grokking experiment provides the strongest evidence so far that approximation can create a genuine training barrier. On modular addition, \texttt{int8\_qkv\_dynamic} and \texttt{sketch\_4} fail to grok within 10\,000 steps, while \texttt{sketch\_8} (only slightly larger) succeeds. This sharp cutoff---a transition from failure to success as sketch dimension increases from 4 to 8---mirrors the kind of phase-transition-like behavior that the Ising experiment was designed to expose but could not, because magnetization regression does not separate memorization from generalization. Conversely, \texttt{int8\_logits\_dynamic} groks roughly twice as fast as fp32, demonstrating that approximation can also act as beneficial regularization. These results should be treated as preliminary: the pilot uses only 2 seeds and a single model size, and the transition from sketch-4 to sketch-8 should be tested more densely. A more complete study would sweep sketch dimensions $s\in\{4,5,6,7,8\}$ with 5+ seeds and report grokking probability as a function of $s$.
+
+The Ising barrier diagnostics and the grokking experiment together suggest a broader direction: mixed precision and RandNLA should be analyzed not only through forward error, but also through the distortion they introduce into the training signal. A more complete theory would bound the difference between full-precision and approximate gradients, and relate this difference to whether training can cross from memorization to generalization. The predictor--corrector analogy with Kalman filtering is a useful practical diagnostic: approximate updates can be viewed as noisy predictions, while occasional full-precision updates act as high-fidelity corrections. In the current pilot sweeps, the correction schedule does not substantially improve the sketch policies, but the gradient diagnostics cleanly separate floating-point policies (gradient cosine$\approx 1$) from sketch policies (gradient cosine$\approx 0$), confirming that the two classes of approximation distort the learning signal in qualitatively different ways.
 
 On the analytical side, the $\sqrt{n}$ bound on $\|\Sigma(\widehat{L})\|_2$ is likely loose for near-doubly-stochastic attention matrices; a refined bound that exploits the concentration of softmax rows could tighten the value-perturbation term. The logit-perturbation term could similarly be refined by replacing the worst-case $\|V\|_2$ with an average-case or data-dependent quantity.
