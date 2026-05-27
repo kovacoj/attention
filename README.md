@@ -24,6 +24,9 @@ uv run python -m src --experiment residual-stack --depths 4,8,16 --terminal-time
 uv run python -m src --experiment residual-stack --depths 8 --residual-scale 0.125
 uv run python -m src --experiment residual-stack --data-source transformer --depths 2,4 --transformer-model sshleifer/tiny-distilbert-base-cased --transformer-layer 0 --transformer-head 0
 
+# Attention entropy transition with quantization policies
+python3 src/temperature_experiment.py --output results/attention_temperature_sweep.dev.csv
+
 # Sketching baseline
 uv run python -m src --experiment sketch --output results/attention_sweep.csv
 
@@ -52,6 +55,7 @@ Current experiment tracks:
 
 - `precision-placement`: exact attention with explicit storage / accumulation / logit / softmax / value policies.
 - `residual-stack`: repeated self-attention residual steps for simple depth-propagation experiments.
+- `temperature`: inverse-temperature sweep across the attention entropy transition, including int8 quantization policies.
 - `sketch`: the older sketch-based baseline retained for comparison.
 - `random-features`: Performer-style approximation experiments.
 

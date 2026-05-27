@@ -361,6 +361,75 @@ The transformer activations (Table~\ref{tab:transformer}) reveal a qualitatively
 
 The most important empirical message across both tables is that low-precision softmax is the clearest failure mode at the probability-matrix level, while in the tested small regimes, low-precision storage of $Q,K,V$ with fp32 accumulation remains much safer than low-precision softmax at the probability-matrix level. This is precisely the kind of location-specific statement that a global dtype comparison would miss. The full exact-attention and residual-depth sweeps are committed in \texttt{results/precision\_policy\_sweep.dev.csv}, \texttt{results/precision\_policy\_transformer.dev.csv}, \texttt{results/residual\_stack\_sweep.dev.csv}, and \texttt{results/residual\_stack\_transformer.dev.csv}.
 
+\subsection{Attention Entropy Transition and Quantization}
+
+A useful way to expose precision sensitivity inside the attention block itself is to introduce an inverse-temperature parameter $\beta$ and study
+\[
+    P_\beta = \operatorname{softmax}(\beta L),
+    \qquad
+    L = QK^*/\sqrt d.
+\]
+For small $\beta$, the attention rows are diffuse and high-entropy. For large $\beta$, the rows become concentrated and approach a winner-take-all map. For finite sequence length this is not a thermodynamic phase transition, but it is a sharp finite-size crossover in the geometry of the attention matrix.
+
+We track the normalized entropy
+\[
+    \frac{H_\beta}{\log n}
+    =
+    -\frac{1}{n\log n}
+    \sum_{i,j} p_{ij}^{(\beta)} \log p_{ij}^{(\beta)},
+\]
+the mean maximum attention mass
+\[
+    M_\beta = \frac1n\sum_i \max_j p_{ij}^{(\beta)},
+\]
+the probability error $E_P$, the output error $E_A$, and the argmax flip rate
+\[
+    R_{\mathrm{flip}}
+    =
+    \frac1n
+    \#\{i : \arg\max_j p_{ij}^{(\beta)}
+    \neq
+    \arg\max_j \widehat p_{ij}^{(\beta)}\}.
+\]
+
+This experiment also clarifies the difference between mixed precision and quantization. Mixed precision changes the floating-point format used at different stages of the computation. Quantization introduces an explicit map from real values to a discrete low-bit representation. In the symmetric int8 model used here,
+\[
+    q = \operatorname{clip}(\operatorname{round}(x/S), -127, 127),
+    \qquad
+    \widehat x = S q.
+\]
+Dynamic quantization chooses $S$ from the current tensor range, while the static-logit policy fixes the scale using the $\beta=1$ logits and reuses it for all $\beta$. The latter deliberately exposes clipping once the inverse temperature becomes large. In attention, quantization can be placed on $Q,K,V$, on the logits, on the probabilities, or on the output; here we test QKV quantization and logit quantization.
+
+\begin{table}[ht]
+\centering
+\caption{Representative attention entropy-transition results on Gaussian data ($n=128$, $d=32$, averaged over 2 seeds). The full sweep is committed in \texttt{results/attention\_temperature\_sweep.dev.csv}.}
+\label{tab:temperature}
+\small
+\begin{tabular}{l rrrrrr}
+\toprule
+Policy / $\beta$ & $H/\log n$ & $M_\beta$ & $E_P$ & $E_A$ & $R_{\mathrm{flip}}$ & Clip \\
+\midrule
+\texttt{fp16\_safe}, $\beta=0.5$  & 0.975 & 0.025 & 1.12e-4 & 2.64e-4 & 0.000 & --- \\
+\texttt{fp16\_safe}, $\beta=4$    & 0.335 & 0.534 & 6.72e-4 & 6.80e-4 & 0.000 & --- \\
+\texttt{fp16\_safe}, $\beta=16$   & 0.062 & 0.883 & 7.83e-4 & 1.15e-3 & 0.000 & --- \\
+\midrule
+\texttt{fp16\_low\_softmax}, $\beta=0.5$ & 0.975 & 0.025 & 2.23e-4 & 3.65e-4 & 0.004 & --- \\
+\texttt{fp16\_low\_softmax}, $\beta=4$   & 0.335 & 0.534 & 1.24e-3 & 1.27e-3 & 0.004 & --- \\
+\texttt{fp16\_low\_softmax}, $\beta=16$  & 0.062 & 0.883 & 1.55e-3 & 2.11e-3 & 0.004 & --- \\
+\midrule
+\texttt{int8\_logits\_static\_beta1}, $\beta=0.5$ & 0.975 & 0.025 & 7.56e-3 & 8.66e-3 & 0.047 & 0.000 \\
+\texttt{int8\_logits\_static\_beta1}, $\beta=4$   & 0.335 & 0.534 & 1.44e+0 & 9.52e-1 & 0.922 & 0.322 \\
+\texttt{int8\_logits\_static\_beta1}, $\beta=16$  & 0.062 & 0.883 & 1.92e+0 & 9.92e-1 & 0.980 & 0.804 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:temperature} shows representative rows from the entropy-transition sweep. As $\beta$ increases, $H/\log n$ decreases from near-unity to near-zero while $M_\beta$ increases from near-$1/n$ to near-unity: this is the finite-size crossover from diffuse to concentrated attention. Safe floating-point policies remain stable through this transition: $E_P$ and $E_A$ increase by less than an order of magnitude and $R_{\mathrm{flip}}$ stays at zero. Low-precision softmax shows modestly elevated errors but no catastrophic breakdown.
+
+The static int8 logit policy tells a different story. At $\beta=0.5$ the logits lie within the calibration range inherited from $\beta=1$, clipping is zero, and errors are small. By $\beta=4$ the rescaled logits $\beta L$ exceed the calibration range for roughly 32\% of entries, $E_P$ exceeds unity, and $R_{\mathrm{flip}}$ reaches 92\%. At $\beta=16$ clipping affects 80\% of entries and the argmax flip rate is 98\%---the quantized attention pattern has almost no overlap with the reference. This is precisely the fragility predicted by the quantization model: once the scale is miscalibrated, clipping introduces large structured errors that the perturbation bound in Proposition~\ref{prop:local-perturbation} does not capture, because $\Delta_{\mathrm{quant}}L$ is no longer small.
+
+The transition experiment thus gives a concrete phase-diagram view of precision placement: low precision is easiest in the diffuse regime and most fragile near concentrated, winner-take-all attention.
+
 \subsection{Residual Depth Propagation}
 
 To test how local precision errors accumulate across depth, we evaluate a toy attention-only residual dynamical system of the form

@@ -59,6 +59,7 @@ def attention_components(
     *,
     precision: PrecisionConfig,
     sketch: torch.Tensor | None = None,
+    beta: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Compute attention with optional random projection sketching.
 
@@ -96,7 +97,7 @@ def attention_components(
     k_compute = k_storage.to(qk_compute_dtype)
     v_compute = v_storage.to(pv_compute_dtype)
 
-    logits = (q_compute @ k_compute.transpose(-1, -2)) / math.sqrt(d_model)
+    logits = beta * (q_compute @ k_compute.transpose(-1, -2)) / math.sqrt(d_model)
     logits = logits.to(logits_dtype)
     softmax_dtype = precision.softmax_dtype
     if softmax_dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
