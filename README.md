@@ -73,7 +73,7 @@ make report
 
 `make report` builds the PDF through the repo's Docker/TeX setup.
 
-The report source lives in `report/`, experiment code in `src/`, and committed CSV outputs in `results/`.
+The report source lives in `report/`, experiment code in `src/`, and selected summary CSV outputs in `results/`.
 
 Current experiment tracks:
 

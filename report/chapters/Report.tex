@@ -498,9 +498,9 @@ The approximation barrier is not only a forward error $\|\mathcal A-\widehat{\ma
     \qquad
     \widehat g=\nabla_\theta \mathcal L_{\mathrm{approx}}.
 \]
-If $\widehat g$ remains aligned with $g$, the approximate model can still cross the generalization transition. If the approximation dominates the learning signal, grokking may be delayed or prevented. We measure gradient cosine, relative gradient error, update SNR, and innovation (both $\ell_2$ and KL of output distributions) at selected checkpoints to characterize this distortion.
+If $\widehat g$ remains aligned with $g$, the approximate model can still cross the generalization transition. If the approximation dominates the learning signal, grokking may be delayed or prevented. The experiment code can measure gradient cosine, relative gradient error, update SNR, and innovation (both $\ell_2$ and KL of output distributions) at selected checkpoints to characterize this distortion.
 
-We additionally track two circuit-progress diagnostics. First, a Fourier energy ratio on the learned residue embeddings:
+The code additionally implements two circuit-progress diagnostics for future sweeps. First, a Fourier energy ratio on the learned residue embeddings:
 \[
     R_{\mathrm{Fourier}}(t)
     =
@@ -523,11 +523,11 @@ Second, a uniform-attention drop:
 \]
 If $\Delta_{\mathrm{uniform}}$ is small, then modular addition does not probe adaptive attention routing; it probes a broader low-precision training effect in a transformer-shaped model. Recent work shows that even transformers with uniform attention can solve cyclic modular addition~\autocite{GeometricInductiveBiasGrokking2026}, making this control mandatory for attention-specific claims.
 
-We include two architectural controls: an MLP baseline with matched parameter count, and a uniform-attention evaluation of trained transformer checkpoints. If both controls perform similarly to the transformer, we report the result as a training-barrier study for modular-arithmetic models rather than an attention-specific barrier.
+The code also supports two architectural controls: an MLP baseline with matched parameter count and a uniform-attention evaluation of trained transformer checkpoints. These controls are not included in the pilot table below.
 
 The sketching policies separate fixed sketches (structured bias, same projection every step) from resampled sketches (structured stochastic perturbation, new projection each step). Fixed sketches model a static RandNLA attention backend; resampled sketches model stochastic regularization akin to dropout. These are different scientific objects and must not be conflated. A frozen-checkpoint monotonicity audit would be useful here: average approximation error should decrease with sketch dimension, while training outcomes need not be monotone because the optimizer interacts with the fixed sketch.
 
-We also report phase-targeted schedules: train fp32 until memorization then switch to the approximation, or the reverse. If late-stage approximation helps while early-stage approximation hurts, the approximation acts on cleanup rather than circuit formation. The periodic-correction variants use a predictor--corrector structure inspired by the Extended Kalman Filter. The analogy is not literal: we do not maintain a covariance matrix over network parameters, and the innovation is a probe-batch fidelity measure, not a statistically calibrated residual. A more appropriate algorithmic comparator from the optimization literature is error-feedback SGD~\autocite{Stich2019, Alistarh2017}, which stores residual compression error and re-injects it later.
+The code also supports phase-targeted schedules, such as training fp32 until memorization and then switching to the approximation, or the reverse. These schedules are natural next experiments and are not included in the current pilot table. The periodic-correction variants use a predictor--corrector structure inspired by the Extended Kalman Filter. The analogy is not literal: we do not maintain a covariance matrix over network parameters, and the innovation is a probe-batch fidelity measure, not a statistically calibrated residual. A more appropriate algorithmic comparator from the optimization literature is error-feedback SGD~\autocite{Stich2019, Alistarh2017}, which stores residual compression error and re-injects it later.
 
 Fake-quantization uses the straight-through estimator for gradient propagation; all simulated low-precision policies keep fp32 master weights and fp32 optimizer state, consistent with the standard mixed-precision training recipe~\autocite{MicikeviciusEtAl2018}. Runtime claims are not made from simulated precision.
 
