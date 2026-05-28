@@ -165,11 +165,20 @@ uv run python -m src --experiment residual-stack --data-source transformer --dep
 # Attention entropy transition with quantization policies
 python3 src/temperature_experiment.py --output results/attention_temperature_sweep.dev.csv
 
-# Grokking transition on modular addition
-python3 src/grokking_experiment.py --output results/grokking_transition.dev.csv
+# Grokking barrier phase diagram on modular addition
+python3 src/grokking_experiment.py \
+  --output-curves results/grokking_curves.dev.csv \
+  --output-gradbarrier results/grokking_gradbarrier.dev.csv \
+  --output-summary results/grokking_summary.dev.csv
 
 # Quick dev run
-python3 src/grokking_experiment.py --steps 2000 --seeds 0 --policies fp32 sketch_4
+python3 src/grokking_experiment.py \
+  --steps 5000 --seeds 0 --policies fp32 sketch_4 \
+  --output-curves results/grokking_curves.dev.csv \
+  --output-summary results/grokking_summary.dev.csv
+
+# Search for a working fp32 baseline cell first
+python3 src/grokking_experiment.py --search-baseline
 
 # Sketching baseline
 uv run python -m src --experiment sketch --output results/attention_sweep.csv
@@ -188,7 +197,7 @@ uv run python -m src.plotting results/random_feature_sweep.dev.csv report/figure
 <p><code>make report</code> builds the PDF through the repo&#x27;s Docker/TeX setup.</p>
 <p>The report source lives in <code>report/</code>, experiment code in <code>src/</code>, and committed CSV outputs in <code>results/</code>.</p>
 <p>Current experiment tracks:</p>
-<ul><li><code>precision-placement</code>: exact attention with explicit storage / accumulation / logit / softmax / value policies.</li><li><code>residual-stack</code>: repeated self-attention residual steps for simple depth-propagation experiments.</li><li><code>temperature</code>: inverse-temperature sweep across the attention entropy transition, including int8 quantization policies.</li><li><code>grokking</code>: Grokking transition on modular addition. Studies whether mixed precision and RandNLA sketching shift, delay, prevent, or regularize grokking.</li><li><code>sketch</code>: the older sketch-based baseline retained for comparison.</li><li><code>random-features</code>: Performer-style approximation experiments.</li></ul>
+<ul><li><code>precision-placement</code>: exact attention with explicit storage / accumulation / logit / softmax / value policies.</li><li><code>residual-stack</code>: repeated self-attention residual steps for simple depth-propagation experiments.</li><li><code>temperature</code>: inverse-temperature sweep across the attention entropy transition, including int8 quantization policies.</li><li><code>grokking</code>: Approximation barrier phase diagram on modular addition. Maps which policies preserve, delay, accelerate, or prevent the grokking/generalization transition.</li><li><code>sketch</code>: the older sketch-based baseline retained for comparison.</li><li><code>random-features</code>: Performer-style approximation experiments.</li></ul>
 <p>JAX is currently an optional backend scaffold rather than a required dependency. The main verified sweeps in this repo run in PyTorch, while <code>--backend jax</code> is intended as the next experiment path once JAX is installed locally.</p>
     </section>
   </main>
