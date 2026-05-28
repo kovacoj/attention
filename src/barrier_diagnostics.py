@@ -47,7 +47,7 @@ def compute_gradient_barrier_metrics(
     eps = 1e-12
 
     model.zero_grad()
-    pred_ref, _ = model(batch_tokens, precision_policy=reference_policy, sketch_dim=sketch_dim)
+    pred_ref, _ = model(batch_tokens, train_policy=reference_policy, sketch_dim=sketch_dim)
     loss_ref = loss_fn(pred_ref, batch_targets)
     loss_ref.backward()
     g_ref = _flatten_grads(model.parameters())
@@ -58,7 +58,7 @@ def compute_gradient_barrier_metrics(
         pred_ref_det = pred_ref.detach()
 
     model.zero_grad()
-    pred_approx, _ = model(batch_tokens, precision_policy=approximate_policy, sketch_dim=sketch_dim)
+    pred_approx, _ = model(batch_tokens, train_policy=approximate_policy, sketch_dim=sketch_dim)
     loss_approx = loss_fn(pred_approx, batch_targets)
     loss_approx.backward()
     g_approx = _flatten_grads(model.parameters())

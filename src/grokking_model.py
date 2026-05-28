@@ -46,12 +46,15 @@ class GrokTransformer(nn.Module):
         *,
         train_policy: str = "fp32",
         eval_policy: str | None = None,
-        precision_policy: str = "fp32",
         sketch_dim: int | None = None,
+        resample_sketch: bool = False,
         return_attention: bool = False,
         force_uniform_attention: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
-        policy = eval_policy if (not self.training and eval_policy is not None) else (train_policy if train_policy != "fp32" else precision_policy)
+        if self.training:
+            policy = train_policy
+        else:
+            policy = eval_policy if eval_policy is not None else train_policy
 
         B, T = x.shape
         positions = torch.arange(T, device=x.device).unsqueeze(0).expand(B, -1)
@@ -63,6 +66,7 @@ class GrokTransformer(nn.Module):
                 h,
                 precision_policy=policy,
                 sketch_dim=sketch_dim,
+                resample_sketch=resample_sketch,
                 force_uniform_attention=force_uniform_attention,
             )
             last_attn = attn
@@ -109,10 +113,10 @@ class _GrokBlock(nn.Module):
         clip_logits = 0.0
 
         if policy.startswith("int8_qkv"):
-            q, _, clip_qkv = fake_quant_symmetric_int8_ste(q)
+            q, _, c1 = fake_quant_symmetric_int8_ste(q)
             k, _, c2 = fake_quant_symmetric_int8_ste(k)
             v, _, c3 = fake_quant_symmetric_int8_ste(v)
-            clip_qkv = max(clip_qkv, c2.item(), c3.item())
+            clip_qkv = max(c1.item(), c2.item(), c3.item())
         elif policy.startswith("bf16"):
             q = fake_cast(q, torch.bfloat16)
             k = fake_cast(k, torch.bfloat16)
@@ -130,6 +134,7 @@ class _GrokBlock(nn.Module):
         *,
         precision_policy: str = "fp32",
         sketch_dim: int | None = None,
+        resample_sketch: bool = False,
         force_uniform_attention: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         B, T, _ = x.shape
@@ -146,10 +151,18 @@ class _GrokBlock(nn.Module):
         k = k.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
         v = v.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
 
-        if sketch_dim is not None and precision_policy.startswith("sketch"):
+        is_sketch = precision_policy.startswith("sketch")
+
+        if is_sketch and sketch_dim is not None:
             if sketch_dim > self.max_sketch_dim:
                 raise ValueError(f"sketch_dim={sketch_dim} exceeds max_sketch_dim={self.max_sketch_dim}")
-            S = self.sketch_base[:, :sketch_dim].to(dtype=q.dtype, device=q.device) / math.sqrt(sketch_dim)
+            if resample_sketch:
+                S = torch.randn(
+                    self.d_head, sketch_dim,
+                    dtype=q.dtype, device=q.device,
+                ) / math.sqrt(sketch_dim)
+            else:
+                S = self.sketch_base[:, :sketch_dim].to(dtype=q.dtype, device=q.device) / math.sqrt(sketch_dim)
             q_s = q @ S
             k_s = k @ S
             logits = (q_s @ k_s.transpose(-1, -2)) / math.sqrt(self.d_head)

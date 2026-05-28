@@ -17,6 +17,7 @@ class SummaryRow:
     fixed_sketch: bool
     resample_sketch: bool
     correction_period: int | None
+    architecture: str
     n_seeds: int
     p: int
     train_fraction: float
@@ -26,6 +27,7 @@ class SummaryRow:
     final_test_acc_mean: float
     final_train_acc_std: float
     final_test_acc_std: float
+    fit_rate: float
     grok_rate: float
     t_mem_median: float
     t_grok_median: float
@@ -34,7 +36,20 @@ class SummaryRow:
     grad_cos_final_mean: float
     grad_relerr_final_mean: float
     update_snr_final_mean: float
-    innovation_final_mean: float
+    innovation_prob_kl_final_mean: float
+    uniform_attn_drop_mean: float
+    fourier_energy_final_mean: float
+    outcome_class: str
+
+
+def _classify_outcome(grok_rate: float, fit_rate: float) -> str:
+    if fit_rate < 0.5:
+        return "failed_to_fit"
+    if grok_rate >= 0.9:
+        return "preserved"
+    if grok_rate > 0.0:
+        return "partial"
+    return "memorized_only"
 
 
 def build_summary(
@@ -43,7 +58,7 @@ def build_summary(
 ) -> list[SummaryRow]:
     final_curves: dict[tuple[str, int], CurveRow] = {}
     for c in curves:
-        key = (c.policy, c.seed)
+        key = (c.train_policy, c.seed)
         if key not in final_curves or c.step > final_curves[key].step:
             final_curves[key] = c
 
@@ -68,6 +83,7 @@ def build_summary(
         grok_steps = []
         delays = []
         grok_count = 0
+        fit_count = 0
         censored = 0
         c0 = final_curves[(pol, seeds[0])]
 
@@ -75,6 +91,8 @@ def build_summary(
             c = final_curves[(pol, s)]
             tr_accs.append(c.train_acc)
             te_accs.append(c.test_acc)
+            if c.train_acc >= 0.99:
+                fit_count += 1
             if c.memorization_step > 0:
                 mem_steps.append(c.memorization_step)
             if c.grokking_step > 0:
@@ -94,10 +112,14 @@ def build_summary(
         grok_median = sorted(grok_steps)[len(grok_steps) // 2] if grok_steps else float("nan")
         delay_median = sorted(delays)[len(delays) // 2] if delays else float("nan")
 
+        fit_rate = fit_count / n
+        grok_rate = grok_count / n
+        censored_frac = censored / n
+
         grad_cos_vals = []
         grad_rel_vals = []
         snr_vals = []
-        inno_vals = []
+        inno_kl_vals = []
         for s in seeds:
             g = final_grads.get((pol, s))
             if g is not None:
@@ -107,8 +129,19 @@ def build_summary(
                     grad_rel_vals.append(g.grad_relerr)
                 if not math.isnan(g.update_snr):
                     snr_vals.append(g.update_snr)
-                if not math.isnan(g.innovation_norm):
-                    inno_vals.append(g.innovation_norm)
+                if not math.isnan(g.innovation_prob_kl):
+                    inno_kl_vals.append(g.innovation_prob_kl)
+
+        uniform_drops = []
+        fourier_vals = []
+        for s in seeds:
+            c = final_curves[(pol, s)]
+            if not math.isnan(c.uniform_attn_eval_drop):
+                uniform_drops.append(c.uniform_attn_eval_drop)
+            if not math.isnan(c.fourier_energy_ratio):
+                fourier_vals.append(c.fourier_energy_ratio)
+
+        outcome = _classify_outcome(grok_rate, fit_rate)
 
         rows.append(SummaryRow(
             policy=pol,
@@ -118,6 +151,7 @@ def build_summary(
             fixed_sketch=c0.fixed_sketch,
             resample_sketch=c0.resample_sketch,
             correction_period=c0.correction_period,
+            architecture=c0.architecture,
             n_seeds=n,
             p=c0.p,
             train_fraction=c0.train_fraction,
@@ -127,15 +161,19 @@ def build_summary(
             final_test_acc_mean=te_mean,
             final_train_acc_std=tr_std,
             final_test_acc_std=te_std,
-            grok_rate=grok_count / n,
+            fit_rate=fit_rate,
+            grok_rate=grok_rate,
             t_mem_median=mem_median,
             t_grok_median=grok_median,
             grok_delay_median=delay_median,
-            censored_fraction=censored / n,
+            censored_fraction=censored_frac,
             grad_cos_final_mean=sum(grad_cos_vals) / len(grad_cos_vals) if grad_cos_vals else float("nan"),
             grad_relerr_final_mean=sum(grad_rel_vals) / len(grad_rel_vals) if grad_rel_vals else float("nan"),
             update_snr_final_mean=sum(snr_vals) / len(snr_vals) if snr_vals else float("nan"),
-            innovation_final_mean=sum(inno_vals) / len(inno_vals) if inno_vals else float("nan"),
+            innovation_prob_kl_final_mean=sum(inno_kl_vals) / len(inno_kl_vals) if inno_kl_vals else float("nan"),
+            uniform_attn_drop_mean=sum(uniform_drops) / len(uniform_drops) if uniform_drops else float("nan"),
+            fourier_energy_final_mean=sum(fourier_vals) / len(fourier_vals) if fourier_vals else float("nan"),
+            outcome_class=outcome,
         ))
 
     return rows

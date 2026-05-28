@@ -27,7 +27,7 @@
 
 %% Abstract
 \newcommand*{\Abstract}{%
-    We study scaled dot-product attention as a precision-placement problem. Rather than asking whether a single global low-precision dtype is acceptable, we ask which stages of the forward pass can safely use reduced precision: storage of query, key, and value tensors, the logit product, logit storage, rowwise softmax, and the final value product. We prove a local perturbation bound separating logit errors from value errors, and we extend the same viewpoint to quantization by modeling quantized tensors as structured perturbations. Exact-attention experiments show that low-precision storage with high-precision accumulation is comparatively stable, whereas low-precision softmax is the clearest floating-point failure mode. A temperature-scaled attention experiment reveals a finite-size entropy-collapse crossover in which static int8 logit quantization fails through clipping and argmax flips. Finally, an Ising magnetization task gives a preliminary training-time test of whether reduced precision or randomized sketching changes learnability. The sketched-attention baseline is kept as a controlled stress test for the interaction between randomized approximation and finite precision.
+    We study scaled dot-product attention as a precision-placement problem. Rather than asking whether a single global low-precision dtype is acceptable, we ask which stages of the forward pass can safely use reduced precision: storage of query, key, and value tensors, the logit product, logit storage, rowwise softmax, and the final value product. We prove a local perturbation bound separating logit errors from value errors, and we extend the same viewpoint to quantization by modeling quantized tensors as structured perturbations. Exact-attention experiments show that low-precision storage with high-precision accumulation is comparatively stable, whereas low-precision softmax is the clearest floating-point failure mode among floating-point placement policies. A temperature-scaled attention experiment reveals a finite-size entropy-collapse crossover in which static int8 logit quantization fails through clipping and argmax flips. Finally, modular-arithmetic experiments study mixed precision, quantization, and fixed RandNLA sketches as training-time perturbations that may preserve, accelerate, or prevent the transition from memorization to algorithmic generalization.
 }
 
 %% Subject (short description for PDF metadata)
@@ -37,8 +37,8 @@
 
 %% Keywords (about 3-7)
 \newcommand*{\Keywords}{%
-    mixed-precision arithmetic, attention, transformers, numerical stability, floating-point arithmetic
+    mixed-precision arithmetic, attention, transformers, quantization, randomized linear algebra, grokking
 }
 \newcommand*{\KeywordsPlaintext}{%
-    mixed-precision arithmetic, attention, transformers, numerical stability, floating-point arithmetic
+    mixed-precision arithmetic, attention, transformers, quantization, randomized linear algebra, grokking
 }

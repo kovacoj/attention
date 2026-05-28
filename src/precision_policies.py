@@ -24,3 +24,15 @@ def fake_quant_symmetric_int8_ste(
     with torch.no_grad():
         clip_frac = (x.detach().abs() / scale > 127).float().mean()
     return x_ste, scale, clip_frac
+
+
+def innovation_prob_kl(
+    logits_ref: torch.Tensor,
+    logits_approx: torch.Tensor,
+    eps: float = 1e-30,
+) -> float:
+    with torch.no_grad():
+        p = torch.softmax(logits_ref.float(), dim=-1).clamp_min(eps)
+        q = torch.softmax(logits_approx.float(), dim=-1).clamp_min(eps)
+        kl = (p * (p.log() - q.log())).sum(dim=-1).mean().item()
+    return max(kl, 0.0)
