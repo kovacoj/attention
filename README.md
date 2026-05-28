@@ -29,8 +29,17 @@ python3 src/temperature_experiment.py --output results/attention_temperature_swe
 
 # Grokking barrier phase diagram on modular addition
 python3 src/grokking_experiment.py \
+  --steps 6000 \
+  --train-fraction 0.3 \
+  --weight-decay 1.0 \
+  --d-model 64 \
+  --n-layers 1 \
+  --n-heads 2 \
+  --d-mlp 256 \
+  --seeds 0 1 \
+  --policies fp32 bf16_safe fp16_safe int8_logits_dynamic int8_qkv_dynamic sketch_4_fixed sketch_8_fixed sketch_16_fixed \
   --output-curves results/grokking_curves.dev.csv \
-  --output-gradbarrier results/grokking_gradbarrier.dev.csv \
+  --output-barrier results/grokking_barrier.dev.csv \
   --output-summary results/grokking_summary.dev.csv
 
 # Quick dev run
