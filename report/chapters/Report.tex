@@ -280,7 +280,7 @@ Combining the subspace embedding guarantee with the finite-precision error yield
 
 \section{Numerical Experiments}
 
-The experiments are organized in five layers. Section~4.1 studies exact attention under fixed precision-placement policies. Section~4.2 introduces a temperature parameter to expose an entropy-collapse crossover and quantization clipping. Section~4.3 studies how local precision errors accumulate in a toy residual stack. Section~4.4 uses modular-arithmetic grokking as a training-time barrier test. Section~4.5 returns to sketched attention as an intentionally under-sketched baseline for the error decomposition.
+The experiments are organized in five layers. Section~4.1 studies exact attention under fixed precision-placement policies. Section~4.2 introduces a temperature parameter to expose an entropy-collapse crossover and quantization clipping. Section~4.3 studies how local precision errors accumulate in a toy residual stack. Section~4.4 maps the approximation barrier phase diagram on modular arithmetic. Section~4.5 returns to sketched attention as an intentionally under-sketched baseline for the error decomposition.
 
 \subsection{Exact Attention Under Precision Policies}
 
@@ -472,15 +472,15 @@ Policy & depth 4 & depth 8 & depth 2 & depth 4 \\
 
 Table~\ref{tab:residual} reports $E_{\mathrm{depth}}$ for both Gaussian and transformer-activation residual stacks. On Gaussian data, error grows modestly with depth for all policies: the fp16-safe error roughly doubles from $L = 4$ to $L = 8$, while the bf16-safe error grows by roughly 50\%. The low-precision value policies show the steepest depth growth, consistent with the $\sqrt{n}\|\Delta V\|_{\mathrm{HS}}$ term in Proposition~\ref{prop:local-perturbation} accumulating across layers. On transformer activations, the residual scaling $h = 1/L$ keeps errors approximately constant or even decreasing with depth, reflecting the stabilizing effect of small residual contributions.
 
-\subsection{Modular Arithmetic Grokking as a Training-Barrier Test}
+\subsection{Modular Arithmetic as a Training-Barrier Phase Diagram}
 
-The modular-arithmetic experiment serves as the main training-time barrier test. Grokking naturally separates memorization from generalization: a model may fit the training pairs before discovering the modular algorithm that extrapolates to held-out pairs. This makes it possible to ask whether low precision or RandNLA sketching changes the transition from memorization to generalization, rather than merely changing inference-time error.
+The goal of this experiment is not to show that an approximate policy uniformly outperforms fp32. Instead, we use modular arithmetic to map which approximation policies preserve, delay, accelerate, or prevent the transition from memorization to algorithmic generalization. This reframes ``success'' as phase-diagram structure: a failed policy is informative if it fails reproducibly and if its failure correlates with sketch dimension, quantization location, or gradient-signal distortion.
 
 We use modular addition,
 \[
     (a,b)\mapsto (a+b)\bmod p,
 \]
-with $p=97$ and a random train/test split (40\% train). A small single-head attention model ($d_{\mathrm{model}}=64$, depth $1$, MLP hidden $128$) receives the token sequence $[a,b,=]$ and predicts the result class. The model is trained with AdamW (weight decay $1.0$, learning rate $10^{-3}$) far beyond the point where it fits the training set.
+with $p=97$ and a stratified train/val/test split (30\% train, 10\% val, 60\% test). A small transformer ($d_{\mathrm{model}}=64$, $2$ heads, depth $1$, MLP hidden $256$) receives the token sequence $[a,b,=]$ and predicts the result class. The model is trained with AdamW (weight decay $1.0$, learning rate $10^{-3}$) using full-batch updates far beyond the point where it fits the training set.
 
 For each policy we track train accuracy, test accuracy, the memorization step
 \[
@@ -490,49 +490,47 @@ and the grokking step
 \[
     t_{\mathrm{grok}}=\min\{t:\mathrm{acc}_{\mathrm{test}}(t)\ge0.95\}.
 \]
-The grokking delay is $t_{\mathrm{grok}}-t_{\mathrm{mem}}$. Approximate attention policies may shift this delay, prevent grokking, or in some regimes act as regularization and accelerate it.
+If either threshold is not reached within the training horizon, the corresponding time is right-censored. The grokking delay is $t_{\mathrm{grok}}-t_{\mathrm{mem}}$.
 
-In this setting, the approximation barrier is not only a forward error $\|\mathcal A-\widehat{\mathcal A}\|$. It is also a training-signal error:
+The approximation barrier is not only a forward error $\|\mathcal A-\widehat{\mathcal A}\|$. During training, it is also a learning-signal error. For a fixed probe batch, let
 \[
     g=\nabla_\theta \mathcal L_{\mathrm{fp32}},
     \qquad
     \widehat g=\nabla_\theta \mathcal L_{\mathrm{approx}}.
 \]
-If $\widehat g$ remains aligned with $g$, the approximate model can still cross the generalization transition. If the approximation dominates the learning signal, grokking may be delayed or prevented.
+If $\widehat g$ remains aligned with $g$, the approximate model can still cross the generalization transition. If the approximation dominates the learning signal, grokking may be delayed or prevented. We measure gradient cosine, relative gradient error, and update SNR at selected checkpoints to characterize this distortion.
 
 \begin{table}[ht]
 \centering
-\caption{Pilot modular-arithmetic grokking experiment ($p=97$, 40\% train, averaged over 2 seeds). A value of -- means the threshold was not reached within the run. The sketched policies use a fixed Gaussian sketch matrix per attention block throughout training. The full learning curves are committed in \texttt{results/grokking\_transition.dev.csv}; the policy-level summary used in this table is committed in \texttt{results/grokking\_summary.dev.csv}.}
+\caption{Pilot modular-arithmetic barrier phase diagram ($p=97$, 30\% train, $2$ seeds, $6000$ steps). Outcome classes: \emph{preserved} = grokking rate $\ge 0.9$; \emph{partial/unreliable} = $0 < $ grokking rate $< 0.9$; \emph{failed to fit} = train accuracy never reaches $0.99$. A value of -- means the threshold was not reached during the run. The policy-level summary is committed in \texttt{results/grokking\_summary.dev.csv}.}
 \label{tab:grokking}
 \small
-\begin{tabular}{lrrrrr}
+\begin{tabular}{lrrrrrr}
 \toprule
-Policy & Test acc & Train acc & $t_{\mathrm{mem}}$ & $t_{\mathrm{grok}}$ & Grokked \\
+Policy & Test acc & Train acc & Grok rate & $t_{\mathrm{grok}}$ & Outcome & Interpretation \\
 \midrule
-\texttt{fp32}                & 1.000 & 1.000 & 2900 & 3000 & Yes \\
-\texttt{fp16\_safe}          & 1.000 & 1.000 & 3000 & 3100 & Yes \\
-\texttt{bf16\_safe}          & 1.000 & 1.000 & 3000 & 3000 & Yes \\
-\texttt{int8\_logits\_dyn}   & 0.973 & 0.985 & 1300 & 1400 & Yes \\
-\texttt{int8\_qkv\_dyn}      & 0.008 & 0.014 & --   & --   & No \\
-\texttt{sketch\_4}           & 0.052 & 0.356 & --   & --   & No \\
-\texttt{sketch\_4+corr}      & 0.050 & 0.355 & --   & --   & No \\
-\texttt{sketch\_8}           & 0.052 & 0.037 & --   & --   & No \\
-\texttt{sketch\_16}          & 0.052 & 0.037 & --   & --   & No \\
+\texttt{fp32}                 & 0.992 & 1.000 & 1.00 & 3750 & preserved & reference transition \\
+\texttt{bf16\_safe}           & 0.990 & 1.000 & 1.00 & 2750 & preserved & storage perturbation below barrier \\
+\texttt{fp16\_safe}           & 0.695 & 1.000 & 0.50 & 3000 & partial & fp16 overflow/underflow noise \\
+\texttt{int8\_logits\_dyn}    & 0.519 & 0.567 & 0.50 & 2500 & partial & logit quantization may regularize \\
+\texttt{int8\_qkv\_dyn}       & 0.513 & 0.512 & 0.50 & 2000 & partial & QKV perturbation borderline \\
+\texttt{sketch\_4}            & 0.998 & 1.000 & 1.00 & 2500 & preserved & small sketch sufficient \\
+\texttt{sketch\_8}            & 0.979 & 1.000 & 1.00 & 3500 & preserved & adequate retained dimension \\
+\texttt{sketch\_16}           & 0.354 & 0.359 & 0.00 & --   & failed & overcompression destroys signal \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:grokking} reports the results. The policies separate into two regimes:
+Table~\ref{tab:grokking} reports the pilot results. The policies separate into three qualitative regimes:
 \begin{enumerate}
-    \item \textbf{Grokking succeeds.} \texttt{fp32}, \texttt{fp16\_safe}, and \texttt{bf16\_safe} grok at step $\sim$3000. \texttt{int8\_logits\_dynamic} reaches the generalization threshold at step $\sim$1400, roughly twice as fast as fp32. This is consistent with a regularization effect that suppresses memorizing solutions and favors the generalizing circuit, but more seeds are needed to determine whether the effect is robust.
-    \item \textbf{Grokking prevented.} \texttt{int8\_qkv\_dynamic} and all sketched policies fail to grok within 10\,000 steps, with test accuracy stuck at chance level ($\sim$1\%) for int8 QKV and $\sim$5\% for the sketched policies. The periodic fp32 correction does not rescue \texttt{sketch\_4}. Unlike the earlier pilot with resampled sketches---where \texttt{sketch\_8} and \texttt{sketch\_16} occasionally succeeded---the fixed-sketch policies consistently fail, suggesting that per-step resampling provided implicit stochastic regularization that is absent when the sketch is held constant.
+    \item \textbf{Preserved.} \texttt{fp32}, \texttt{bf16\_safe}, \texttt{sketch\_4}, and \texttt{sketch\_8} reliably cross the generalization transition. Safe mixed precision and modest feature sketching are below the training-signal barrier. This is consistent with the standard mixed-precision training recipe, which preserves an fp32 master copy of weights and uses loss scaling to avoid gradient underflow.
+    \item \textbf{Partial or unreliable.} \texttt{fp16\_safe}, \texttt{int8\_logits\_dynamic}, and \texttt{int8\_qkv\_dynamic} succeed on some seeds but fail on others. The grokking rate is $0.5$ in this pilot, meaning the transition is close to the barrier boundary. More seeds are needed to determine whether these policies are slightly above or slightly below the threshold. The 8-bit training literature has required enhanced loss scaling and stochastic rounding precisely because backpropagation and error propagation are fragile at very low precision.
+    \item \textbf{Failed to fit.} \texttt{sketch\_16} neither memorizes nor generalizes. With $d_h=32$ and sketch dimension $s=16$, the retained information is too small to support even memorization. This is not a training barrier but a capacity barrier.
 \end{enumerate}
 
-Thus the modular-arithmetic task gives a clean training-barrier test: the control parameter is the approximation policy itself, and the observable is whether the model crosses the generalization transition. The pilot suggests that aggressive approximations can either accelerate, preserve, or prevent the generalization transition depending on where and how the approximation is introduced.
+The periodic-correction variants are inspired by the predictor--corrector structure of the Extended Kalman Filter. The analogy is not literal: we do not maintain a covariance matrix over network parameters. Approximate low-precision or sketched updates play the role of noisy prediction steps, while occasional fp32 updates act as high-fidelity corrections. This tests whether the barrier is caused by accumulated approximate-update distortion. In the current pilot, the correction schedule does not substantially help the partial/unreliable policies, suggesting that the barrier is not caused by occasional misaligned steps but by a systematic distortion of the learning landscape. Gradient diagnostics at the final checkpoint show cosine $\approx 1$ for preserved policies and cosine $\approx 0.5$--$0.7$ for partial policies, supporting the interpretation that partial policies sit near the barrier boundary.
 
-The periodic-correction variants are inspired by the predictor--corrector structure of the Extended Kalman Filter. The analogy is not literal: we do not maintain a covariance matrix over network parameters. Rather, approximate low-precision or sketched updates play the role of noisy prediction steps, while occasional fp32 updates act as high-fidelity corrections. This tests whether the barrier is caused by accumulated approximate-update distortion. In the current pilot, the correction does not help: \texttt{sketch\_4} with periodic fp32 correction still fails, suggesting that the barrier is not caused by occasional misaligned steps but by a systematic distortion of the learning landscape.
-
-In this pilot, memorization and test generalization often occur close together for successful policies. Therefore the experiment should be read as a grokking-inspired algorithmic generalization transition, not yet as definitive evidence of long-delay grokking. The sketched policies use a fixed Gaussian sketch matrix per attention block throughout training, so they model training under a fixed RandNLA attention backend rather than resampling noise at each step.
+In this pilot, memorization and test generalization often occur close together for successful policies. Therefore the experiment should be read as mapping a grokking-inspired algorithmic generalization transition, not yet as definitive evidence of long-delay grokking. The sketched policies use a fixed Gaussian sketch matrix per attention block throughout training, so they model training under a fixed RandNLA attention backend rather than resampling noise at each step. Fake-quantization uses the straight-through estimator for gradient propagation.
 
 \subsection{A Stress-Test Baseline}
 
@@ -590,8 +588,8 @@ The main contribution of this report is the precision-placement decomposition of
 
 Several directions remain open. First, the current experiments use small problem sizes ($n \leq 256$, $d \leq 64$); scaling to realistic transformer dimensions will require either GPU acceleration or the JAX backend scaffold already present in the repository. Second, FP8 policies are reported only under an explicit quantization model; a more complete treatment would include hardware-specific scaling and dequantization. Third, the phase-diagram analogy from Decelle et al.~\autocite{DecelleEtAl2011} suggests mapping not only average error but also regime changes: when does low-precision logit storage remain harmless, when does low-precision softmax begin to amplify, and when does no practical low-precision policy preserve the reference behavior? The current data already hints at these transitions but does not yet chart them systematically. Fourth, the JAX-focused mixed-precision framework of Graefe and Trimpe~\autocite{GraefeTrimpe2025} provides a natural implementation path for the safe/unsafe policy distinctions identified here. We note that the current JAX backend in the repository maps PyTorch fp8 dtypes to JAX float16, so JAX-based fp8 experiments would require a dedicated quantization path and should not be compared directly with PyTorch fp8 results.
 
-The grokking experiment provides the strongest evidence so far that approximation can create a genuine training barrier. On modular addition, \texttt{int8\_qkv\_dynamic} and all fixed-sketch policies fail to grok within 10\,000 steps, while \texttt{int8\_logits\_dynamic} groks roughly twice as fast as fp32, demonstrating that approximation can also act as beneficial regularization. These results should be treated as preliminary: the pilot uses only 2 seeds and a single model size. A more complete study would sweep sketch dimensions $s\in\{4,5,6,7,8\}$ with 5+ seeds and report grokking probability as a function of $s$.
+The grokking experiment provides the strongest evidence so far that approximation can create genuine training barriers. On modular addition, the pilot phase diagram shows three regimes: preserved policies that reliably cross the generalization transition (fp32, bf16\_safe, sketch\_4, sketch\_8), partial policies that succeed on some seeds but not others (fp16\_safe, int8\_logits, int8\_qkv), and failed policies that cannot even fit the training set (sketch\_16). The partial regime is the most informative: it suggests that some approximation policies sit near a barrier boundary, where small changes in random seed or hyperparameters can tip the outcome. More seeds are needed to locate this boundary precisely. A more complete study would use $5$+ seeds per policy, sweep hyperparameters systematically, and report grokking probability as a function of approximation strength.
 
-The grokking experiment also suggests a broader direction: mixed precision and RandNLA should be analyzed not only through forward error, but also through the distortion they introduce into the training signal. A more complete theory would bound the difference between full-precision and approximate gradients, and relate this difference to whether training can cross from memorization to generalization. The predictor--corrector analogy with Kalman filtering is a useful practical diagnostic: approximate updates can be viewed as noisy predictions, while occasional full-precision updates act as high-fidelity corrections. In the current pilot sweeps, the correction schedule does not substantially improve the sketch policies, suggesting that the barrier is not caused by occasional misaligned steps but by a systematic distortion of the learning landscape.
+The grokking experiment also suggests a broader direction: mixed precision and RandNLA should be analyzed not only through forward error, but also through the distortion they introduce into the training signal. A more complete theory would bound the difference between full-precision and approximate gradients, and relate this difference to whether training can cross from memorization to generalization. The predictor--corrector analogy with Kalman filtering is a useful practical diagnostic: approximate updates can be viewed as noisy predictions, while occasional full-precision updates act as high-fidelity corrections. In the current pilot, the correction schedule does not substantially help the partial policies, suggesting that the barrier is not caused by occasional misaligned steps but by a systematic distortion of the learning landscape near the boundary.
 
 On the analytical side, the $\sqrt{n}$ bound on $\|\Sigma(\widehat{L})\|_2$ is likely loose for near-doubly-stochastic attention matrices; a refined bound that exploits the concentration of softmax rows could tighten the value-perturbation term. The logit-perturbation term could similarly be refined by replacing the worst-case $\|V\|_2$ with an average-case or data-dependent quantity.

@@ -45,13 +45,9 @@ def compute_gradient_barrier_metrics(
         loss_fn = nn.MSELoss()
 
     eps = 1e-12
-    original_policy = model.precision_policy
-    original_sketch = model.sketch_dim
 
-    model.precision_policy = reference_policy
-    model.sketch_dim = None if reference_policy.startswith("fp") else sketch_dim
     model.zero_grad()
-    pred_ref, _ = model(batch_tokens)
+    pred_ref, _ = model(batch_tokens, precision_policy=reference_policy, sketch_dim=sketch_dim)
     loss_ref = loss_fn(pred_ref, batch_targets)
     loss_ref.backward()
     g_ref = _flatten_grads(model.parameters())
@@ -61,18 +57,13 @@ def compute_gradient_barrier_metrics(
     with torch.no_grad():
         pred_ref_det = pred_ref.detach()
 
-    model.precision_policy = approximate_policy
-    model.sketch_dim = sketch_dim if approximate_policy.startswith("sketch") else None
     model.zero_grad()
-    pred_approx, _ = model(batch_tokens)
+    pred_approx, _ = model(batch_tokens, precision_policy=approximate_policy, sketch_dim=sketch_dim)
     loss_approx = loss_fn(pred_approx, batch_targets)
     loss_approx.backward()
     g_approx = _flatten_grads(model.parameters())
     grad_norm_approx = g_approx.norm().item()
     model.zero_grad()
-
-    model.precision_policy = original_policy
-    model.sketch_dim = original_sketch
 
     grad_diff = g_approx - g_ref
     grad_diff_norm = grad_diff.norm().item()

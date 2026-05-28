@@ -27,11 +27,20 @@ uv run python -m src --experiment residual-stack --data-source transformer --dep
 # Attention entropy transition with quantization policies
 python3 src/temperature_experiment.py --output results/attention_temperature_sweep.dev.csv
 
-# Grokking transition on modular addition
-python3 src/grokking_experiment.py --output results/grokking_transition.dev.csv
+# Grokking barrier phase diagram on modular addition
+python3 src/grokking_experiment.py \
+  --output-curves results/grokking_curves.dev.csv \
+  --output-gradbarrier results/grokking_gradbarrier.dev.csv \
+  --output-summary results/grokking_summary.dev.csv
 
 # Quick dev run
-python3 src/grokking_experiment.py --steps 2000 --seeds 0 --policies fp32 sketch_4
+python3 src/grokking_experiment.py \
+  --steps 5000 --seeds 0 --policies fp32 sketch_4 \
+  --output-curves results/grokking_curves.dev.csv \
+  --output-summary results/grokking_summary.dev.csv
+
+# Search for a working fp32 baseline cell first
+python3 src/grokking_experiment.py --search-baseline
 
 # Sketching baseline
 uv run python -m src --experiment sketch --output results/attention_sweep.csv
@@ -62,7 +71,7 @@ Current experiment tracks:
 - `precision-placement`: exact attention with explicit storage / accumulation / logit / softmax / value policies.
 - `residual-stack`: repeated self-attention residual steps for simple depth-propagation experiments.
 - `temperature`: inverse-temperature sweep across the attention entropy transition, including int8 quantization policies.
-- `grokking`: Grokking transition on modular addition. Studies whether mixed precision and RandNLA sketching shift, delay, prevent, or regularize grokking.
+- `grokking`: Approximation barrier phase diagram on modular addition. Maps which policies preserve, delay, accelerate, or prevent the grokking/generalization transition.
 - `sketch`: the older sketch-based baseline retained for comparison.
 - `random-features`: Performer-style approximation experiments.
 
