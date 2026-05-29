@@ -531,6 +531,8 @@ The code also supports phase-targeted schedules, such as training fp32 until mem
 
 Fake-quantization uses the straight-through estimator for gradient propagation; all simulated low-precision policies keep fp32 master weights and fp32 optimizer state, consistent with the standard mixed-precision training recipe~\autocite{MicikeviciusEtAl2018}. Runtime claims are not made from simulated precision.
 
+For readability, fixed-sketch policies are displayed as \texttt{sketch\_s}; all sketch rows in the table use fixed Gaussian sketches.
+
 \begin{table}[ht]
 \centering
 \caption{Pilot modular-arithmetic barrier phase diagram ($p=97$, 30\% train, $2$ seeds, $6000$ steps). Outcome classes: \emph{preserved} = grokking rate $\ge 0.9$; \emph{partial/unreliable} = $0 < $ grokking rate $< 0.9$; \emph{failed to fit} = train accuracy never reaches $0.99$. A value of -- means the threshold was not reached during the run. Pilot numbers are computed from the experiment log and should be confirmed with $5$+ seeds before drawing firm conclusions.}
